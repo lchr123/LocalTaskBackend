@@ -1,0 +1,73 @@
+{
+  "name": "local-task-backend",
+  "version": "0.1.0",
+  "description": "Backend API service for the local task platform (本地即时任务平台)",
+  "main": "dist/index.js",
+  "scripts": {
+    "dev": "ts-node -r tsconfig-paths/register src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "test": "jest --run-in-band",
+    "test:integration": "jest --run-in-band --testPathPattern=integration --testTimeout=120000",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint src/ --ext .ts",
+    "typecheck": "tsc --noEmit",
+    "migrate:up": "node-pg-migrate up --migrations-dir migrations --migration-file-language sql",
+    "migrate:down": "node-pg-migrate down --migrations-dir migrations --migration-file-language sql",
+    "migrate:create": "node-pg-migrate create --migrations-dir migrations --migration-file-language sql"
+  },
+  "keywords": [
+    "local-task",
+    "express",
+    "typescript",
+    "postgis"
+  ],
+  "license": "UNLICENSED",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.1053.0",
+    "compression": "^1.8.1",
+    "cors": "^2.8.6",
+    "dotenv": "^17.4.2",
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2",
+    "helmet": "^8.2.0",
+    "jsonwebtoken": "^9.0.3",
+    "jwks-rsa": "^4.0.1",
+    "multer": "^2.1.1",
+    "node-pg-migrate": "^8.0.4",
+    "pg": "^8.21.0",
+    "tsconfig-paths": "^4.2.0",
+    "uuid": "^14.0.0",
+    "ws": "^8.21.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "^12.0.0",
+    "@types/compression": "^1.8.1",
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/jest": "^30.0.0",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.1.0",
+    "@types/node": "^25.9.1",
+    "@types/pg": "^8.20.0",
+    "@types/supertest": "^7.2.0",
+    "@types/uuid": "^10.0.0",
+    "@types/ws": "^8.18.1",
+    "aws-sdk-client-mock": "^4.1.0",
+    "aws-sdk-client-mock-jest": "^4.1.0",
+    "fast-check": "^4.8.0",
+    "jest": "^30.4.2",
+    "jose": "^6.2.3",
+    "supertest": "^7.2.2",
+    "testcontainers": "^12.0.0",
+    "ts-jest": "^29.4.11",
+    "ts-node": "^10.9.2",
+    "typescript": "^6.0.3"
+  }
+}

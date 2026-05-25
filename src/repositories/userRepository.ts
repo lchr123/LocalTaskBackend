@@ -1,0 +1,166 @@
+import { query } from '../config/database';
+import { User } from '../types/user';
+
+interface UserRow {
+  id: string;
+  cognito_sub: string;
+  email: string;
+  phone: string | null;
+  nickname: string | null;
+  avatar_url: string | null;
+  average_rating: string;
+  completed_task_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+function mapRowToUser(row: UserRow): User {
+  return {
+    id: row.id,
+    cognitoSub: row.cognito_sub,
+    email: row.email,
+    phone: row.phone ?? undefined,
+    nickname: row.nickname ?? undefined,
+    avatarUrl: row.avatar_url ?? undefined,
+    averageRating: parseFloat(row.average_rating),
+    completedTaskCount: row.completed_task_count,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Find a user by their Cognito sub (external identity).
+ */
+export async function findByCognitoSub(sub: string): Promise<User | null> {
+  const sql = `
+    SELECT id, cognito_sub, email, phone, nickname, avatar_url,
+           average_rating, completed_task_count, created_at, updated_at
+    FROM users
+    WHERE cognito_sub = $1
+  `;
+
+  const result = await query<UserRow>(sql, [sub]);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToUser(result.rows[0]);
+}
+
+/**
+ * Find a user by their internal UUID.
+ */
+export async function findById(userId: string): Promise<User | null> {
+  const sql = `
+    SELECT id, cognito_sub, email, phone, nickname, avatar_url,
+           average_rating, completed_task_count, created_at, updated_at
+    FROM users
+    WHERE id = $1
+  `;
+
+  const result = await query<UserRow>(sql, [userId]);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToUser(result.rows[0]);
+}
+
+/**
+ * Create a new user record.
+ * Uses ON CONFLICT to handle race conditions (idempotent).
+ */
+export async function create(
+  cognitoSub: string,
+  email: string,
+  phone?: string
+): Promise<User> {
+  const sql = `
+    INSERT INTO users (cognito_sub, email, phone, average_rating, completed_task_count)
+    VALUES ($1, $2, $3, 0.0, 0)
+    ON CONFLICT (cognito_sub) DO UPDATE SET cognito_sub = EXCLUDED.cognito_sub
+    RETURNING id, cognito_sub, email, phone, nickname, avatar_url,
+              average_rating, completed_task_count, created_at, updated_at
+  `;
+
+  const result = await query<UserRow>(sql, [cognitoSub, email, phone || null]);
+  return mapRowToUser(result.rows[0]);
+}
+
+/**
+ * Update user profile fields (nickname and/or avatarUrl).
+ * Only updates fields that are provided (non-undefined).
+ */
+export async function updateProfile(
+  userId: string,
+  updates: { nickname?: string; avatarUrl?: string }
+): Promise<User | null> {
+  const setClauses: string[] = [];
+  const values: unknown[] = [];
+  let paramIndex = 1;
+
+  if (updates.nickname !== undefined) {
+    setClauses.push(`nickname = $${paramIndex}`);
+    values.push(updates.nickname);
+    paramIndex++;
+  }
+
+  if (updates.avatarUrl !== undefined) {
+    setClauses.push(`avatar_url = $${paramIndex}`);
+    values.push(updates.avatarUrl);
+    paramIndex++;
+  }
+
+  if (setClauses.length === 0) {
+    // Nothing to update, just return the current user
+    return findById(userId);
+  }
+
+  setClauses.push(`updated_at = NOW()`);
+
+  const sql = `
+    UPDATE users
+    SET ${setClauses.join(', ')}
+    WHERE id = $${paramIndex}
+    RETURNING id, cognito_sub, email, phone, nickname, avatar_url,
+              average_rating, completed_task_count, created_at, updated_at
+  `;
+
+  values.push(userId);
+
+  const result = await query<UserRow>(sql, values);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToUser(result.rows[0]);
+}
+
+/**
+ * Update a user's average rating.
+ * Called after a new review is submitted.
+ */
+export async function updateRating(
+  userId: string,
+  newRating: number
+): Promise<User | null> {
+  const sql = `
+    UPDATE users
+    SET average_rating = $2, updated_at = NOW()
+    WHERE id = $1
+    RETURNING id, cognito_sub, email, phone, nickname, avatar_url,
+              average_rating, completed_task_count, created_at, updated_at
+  `;
+
+  const result = await query<UserRow>(sql, [userId, newRating]);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  return mapRowToUser(result.rows[0]);
+}
