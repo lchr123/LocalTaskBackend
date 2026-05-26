@@ -18,5 +18,5 @@ CREATE INDEX idx_users_cognito_sub ON users(cognito_sub);
 
 ---- create above / drop below ----
 
-DROP INDEX IF EXISTS idx_users_cognito_sub;
-DROP TABLE IF EXISTS users;
+-- DROP INDEX IF EXISTS idx_users_cognito_sub;
+-- DROP TABLE IF EXISTS users;

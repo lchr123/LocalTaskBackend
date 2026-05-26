@@ -13,8 +13,27 @@ import { reviewController, getUserReviews } from './controllers/reviewController
 import { reportController } from './controllers/reportController';
 import { uploadController } from './controllers/uploadController';
 import { userController } from './controllers/userController';
+import swaggerUi from 'swagger-ui-express';
+import swaggerJsdoc from 'swagger-jsdoc';
 
 const app = express();
+const swaggerSpec = swaggerJsdoc({
+  definition: {
+    openapi: '3.0.0',
+    info: {
+      title: 'Local Task Backend API',
+      version: '0.1.0',
+      description: 'Backend API service for the local task platform',
+    },
+    servers: [
+      {
+        url: 'http://localhost:3000',
+        description: 'Local development server',
+      },
+    ],
+  },
+  apis: ['./src/controllers/**/*.ts', './src/routes/**/*.ts', './src/app.ts'],
+});
 
 // --- Middleware Pipeline ---
 // Order: requestId → cors → securityHeaders → compression → bodyParser → rateLimiter
@@ -39,6 +58,13 @@ app.use(express.urlencoded({ extended: true, limit: '1mb' }));
 app.use(apiRateLimiter);
 
 // --- Route Registration ---
+
+// Swagger API Docs
+app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+
+app.get('/openapi.json', (_req, res) => {
+  res.json(swaggerSpec);
+});
 
 // Health check (no auth required)
 app.use('/health', healthController);
