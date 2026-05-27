@@ -9,7 +9,7 @@ import * as taskRepository from '../repositories/taskRepository';
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   open: ['in_progress', 'cancelled'],
   in_progress: ['completed', 'cancelled'],
-  completed: [],
+  completed: ['in_progress'],  // Allow poster to revert to in_progress
   cancelled: [],
 };
 
@@ -29,6 +29,27 @@ export interface ListTasksResponse {
   page: number;
   totalPages: number;
   totalCount: number;
+}
+
+/**
+ * List tasks posted by a specific user, ordered by creation time (newest first).
+ */
+export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
+  const { query: dbQuery } = await import('../config/database');
+  const result = await dbQuery<Task>(
+    `SELECT id, poster_id AS "posterId", type, description,
+            location_address AS "locationAddress",
+            ST_Y(location::geometry) AS "latitude",
+            ST_X(location::geometry) AS "longitude",
+            reward, deadline, status, intent_count AS "intentCount",
+            selected_helper_id AS "selectedHelperId",
+            created_at AS "createdAt", updated_at AS "updatedAt"
+     FROM tasks
+     WHERE poster_id = $1
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+  return { tasks: result.rows };
 }
 
 /**

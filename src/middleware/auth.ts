@@ -93,16 +93,44 @@ async function findOrCreateUser(
     return findResult.rows[0].id;
   }
 
-  // Create new user record (use ON CONFLICT for race condition safety)
+  // Generate default nickname: 用户_<random 8 chars>
+  const randomStr = Math.random().toString(36).slice(2, 10);
+  const nickname = `用户_${randomStr}`;
+
+  // Create new user record or find existing by cognito_sub or email
+  // Uses a CTE to handle both unique constraints safely
   const createResult = await query<{ id: string }>(
-    `INSERT INTO users (cognito_sub, email, phone, average_rating, completed_task_count)
-     VALUES ($1, $2, $3, 0.0, 0)
-     ON CONFLICT (cognito_sub) DO UPDATE SET cognito_sub = EXCLUDED.cognito_sub
-     RETURNING id`,
-    [cognitoSub, email, phone || null]
+    `WITH existing AS (
+       SELECT id FROM users WHERE cognito_sub = $1 OR email = $2 LIMIT 1
+     ),
+     inserted AS (
+       INSERT INTO users (cognito_sub, email, phone, nickname, average_rating, completed_task_count)
+       SELECT $1, $2, $3, $4, 0.0, 0
+       WHERE NOT EXISTS (SELECT 1 FROM existing)
+       ON CONFLICT (cognito_sub) DO UPDATE SET email = EXCLUDED.email
+       RETURNING id
+     )
+     SELECT id FROM inserted
+     UNION ALL
+     SELECT id FROM existing`,
+    [cognitoSub, email, phone || null, nickname]
   );
 
-  return createResult.rows[0].id;
+  if (createResult.rows.length > 0) {
+    // Also update cognito_sub if user was found by email (re-registration case)
+    await query(
+      `UPDATE users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub != $1`,
+      [cognitoSub, createResult.rows[0].id]
+    );
+    return createResult.rows[0].id;
+  }
+
+  // Fallback: should not reach here, but just in case
+  const fallback = await query<{ id: string }>(
+    'SELECT id FROM users WHERE email = $1',
+    [email]
+  );
+  return fallback.rows[0].id;
 }
 
 /**

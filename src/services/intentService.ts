@@ -77,19 +77,6 @@ export async function submitIntent(
     [taskId]
   );
 
-  // Trigger chat session creation (placeholder - will be implemented by chatService)
-  try {
-    await createChatSessionPlaceholder(taskId, task.posterId, helperId);
-  } catch (err) {
-    // Non-critical: log but don't fail the intent submission
-    logger.warn('Failed to create chat session for intent', {
-      taskId,
-      posterId: task.posterId,
-      helperId,
-      error: err instanceof Error ? err.message : 'Unknown error',
-    });
-  }
-
   // Send notification to task poster
   try {
     await notificationService.notifyNewIntent(task.posterId, intent.helperNickname);
@@ -265,6 +252,16 @@ export async function selectHelper(
   const updatedTask = await taskRepository.findById(taskId);
   if (!updatedTask) {
     throw new NotFoundError('任务不存在');
+  }
+
+  // Create chat session between poster and selected helper
+  try {
+    await createChatSessionPlaceholder(taskId, posterId, helperId);
+  } catch (err) {
+    logger.warn('Failed to create chat session after helper selection', {
+      taskId, posterId, helperId,
+      error: err instanceof Error ? err.message : 'Unknown error',
+    });
   }
 
   return updatedTask;

@@ -4,6 +4,7 @@ import { app } from './app';
 import { config } from './config';
 import { logger } from './utils/logger';
 import { initializeWebSocket } from './websocket/wsServer';
+import { startTaskScheduler, stopTaskScheduler } from './services/taskScheduler';
 
 // Create HTTP Server with Express app
 const server = http.createServer(app);
@@ -30,11 +31,17 @@ export function startServer(): http.Server {
       env: config.nodeEnv,
       wsPath: '/ws/chat',
     });
+
+    // Start periodic task scheduler (auto-cancel expired tasks every 15 min)
+    startTaskScheduler();
   });
 
   // Graceful shutdown handling
   const shutdown = (signal: string) => {
     logger.info(`Received ${signal}. Shutting down gracefully...`);
+
+    // Stop task scheduler
+    stopTaskScheduler();
 
     // Close WebSocket connections
     wss.clients.forEach((client) => {

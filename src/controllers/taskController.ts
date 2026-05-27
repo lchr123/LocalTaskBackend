@@ -43,6 +43,23 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
 });
 
 /**
+ * GET /tasks/mine
+ * List tasks posted by the current authenticated user.
+ * Returns all tasks regardless of status, ordered by creation time (newest first).
+ */
+router.get('/mine', authMiddleware as any, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user!.userId;
+
+    const result = await taskService.listMyTasks(userId);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /tasks/:id
  * Get a single task by ID.
  */
@@ -69,6 +86,39 @@ router.post(
       const authReq = req as AuthenticatedRequest;
       const task = await taskService.createTask(authReq.user!.userId, req.body);
       res.status(201).json(task);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * PATCH /tasks/:id/status
+ * Update task status. Only the task poster can change status.
+ * Allowed transitions: in_progress ↔ completed, in_progress → cancelled
+ */
+router.patch(
+  '/:id/status',
+  authMiddleware as any,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const taskId = req.params.id as string;
+      const { status } = req.body;
+
+      if (!status) {
+        res.status(422).json({ error: 'validation_error', message: 'status 字段为必填' });
+        return;
+      }
+
+      const task = await taskService.getTask(taskId);
+      if (task.posterId !== authReq.user!.userId) {
+        res.status(403).json({ error: 'forbidden', message: '无权执行此操作' });
+        return;
+      }
+
+      const updatedTask = await taskService.updateTaskStatus(taskId, status, authReq.user!.userId);
+      res.status(200).json(updatedTask);
     } catch (err) {
       next(err);
     }

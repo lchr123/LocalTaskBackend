@@ -57,6 +57,42 @@ router.delete(
 );
 
 /**
+ * GET /tasks/:id/intents/mine
+ * Check if the current user has a pending intent for this task.
+ * Returns the intent if exists, or 404 if not.
+ */
+router.get(
+  '/mine',
+  authMiddleware as any,
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const taskId = req.params.id as string;
+      const helperId = req.user!.userId;
+
+      const { query: dbQuery } = await import('../config/database');
+      const result = await dbQuery<{ id: string; message: string | null; status: string; created_at: string }>(
+        `SELECT id, message, status, created_at FROM intents
+         WHERE task_id = $1 AND helper_id = $2 AND status = 'pending'
+         LIMIT 1`,
+        [taskId, helperId]
+      );
+
+      if (result.rows.length === 0) {
+        res.status(404).json({ hasIntent: false });
+        return;
+      }
+
+      res.status(200).json({
+        hasIntent: true,
+        intent: result.rows[0],
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * GET /tasks/:id/intents
  * List all intents for a task. Requires authentication.
  * Only the task poster can view the intent list.
