@@ -10,5 +10,5 @@ CREATE EXTENSION IF NOT EXISTS "postgis";
 
 ---- create above / drop below ----
 
--- DROP EXTENSION IF EXISTS "postgis";
--- DROP EXTENSION IF EXISTS "uuid-ossp";
+DROP EXTENSION IF EXISTS "postgis";
+DROP EXTENSION IF EXISTS "uuid-ossp";

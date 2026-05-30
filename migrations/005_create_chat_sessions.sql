@@ -1,6 +1,6 @@
 -- Migration: 005_create_chat_sessions
 -- Description: Create chat_sessions table for real-time messaging between task posters and helpers
-
+-- Up Migration
 CREATE TABLE chat_sessions (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   task_id           UUID NOT NULL REFERENCES tasks(id),
@@ -25,3 +25,13 @@ CREATE INDEX idx_chat_sessions_helper ON chat_sessions(helper_id);
 
 -- Index for ordering sessions by last message time (most recent first)
 CREATE INDEX idx_chat_sessions_last_msg_time ON chat_sessions(last_message_time DESC);
+
+
+-- Down Migration
+
+DROP INDEX IF EXISTS idx_chat_sessions_last_msg_time;
+DROP INDEX IF EXISTS idx_chat_sessions_helper;
+DROP INDEX IF EXISTS idx_chat_sessions_poster;
+DROP INDEX IF EXISTS idx_chat_sessions_task_users;
+
+DROP TABLE IF EXISTS chat_sessions;

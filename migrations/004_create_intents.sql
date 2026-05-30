@@ -1,7 +1,7 @@
 -- Migration: 004_create_intents
 -- Description: Create intents table with unique partial constraint and CASCADE foreign key
 -- Requirements: 9.3, 9.9
-
+-- Up Migration
 CREATE TABLE intents (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   task_id     UUID NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
@@ -20,3 +20,12 @@ CREATE UNIQUE INDEX idx_intents_unique_pending
 -- B-tree indexes for common query patterns
 CREATE INDEX idx_intents_task_id ON intents(task_id);
 CREATE INDEX idx_intents_helper_id ON intents(helper_id);
+
+
+-- Down Migration
+
+DROP INDEX IF EXISTS idx_intents_helper_id;
+DROP INDEX IF EXISTS idx_intents_task_id;
+DROP INDEX IF EXISTS idx_intents_unique_pending;
+
+DROP TABLE IF EXISTS intents;

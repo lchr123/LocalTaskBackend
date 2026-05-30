@@ -1,6 +1,6 @@
 -- Migration: 007_create_reviews
 -- Description: Create reviews table for task completion ratings between participants
-
+-- Up Migration
 CREATE TABLE reviews (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   task_id     UUID NOT NULL REFERENCES tasks(id),
@@ -19,3 +19,11 @@ CREATE INDEX idx_reviews_reviewee ON reviews(reviewee_id);
 
 -- Composite index for querying reviews by reviewee ordered by creation time (newest first)
 CREATE INDEX idx_reviews_created_at ON reviews(reviewee_id, created_at DESC);
+
+-- Down Migration
+
+DROP INDEX IF EXISTS idx_reviews_created_at;
+DROP INDEX IF EXISTS idx_reviews_reviewee;
+DROP INDEX IF EXISTS idx_reviews_unique;
+
+DROP TABLE IF EXISTS reviews;

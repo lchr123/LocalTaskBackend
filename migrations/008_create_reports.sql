@@ -1,6 +1,6 @@
 -- Migration: 008_create_reports
 -- Description: Create reports table for user/task abuse reporting
-
+-- Up Migration
 CREATE TABLE reports (
   id          UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   reporter_id UUID NOT NULL REFERENCES users(id),
@@ -20,3 +20,10 @@ CREATE INDEX idx_reports_target ON reports(target_type, target_id);
 
 -- Index for filtering reports by status
 CREATE INDEX idx_reports_status ON reports(status);
+
+-- Down Migration
+
+DROP INDEX IF EXISTS idx_reports_status;
+DROP INDEX IF EXISTS idx_reports_target;
+
+DROP TABLE IF EXISTS reports;

@@ -1,12 +1,14 @@
 import { User } from '../types/user';
 import { NotFoundError, ValidationError } from '../utils/errors';
 import * as userRepository from '../repositories/userRepository';
+import { logger } from '../utils/logger';
 
 /**
  * Get the current user's profile by their internal user ID.
  * Throws NotFoundError if the user does not exist.
  */
 export async function getProfile(userId: string): Promise<User> {
+  logger.info('user/me: '+String(userId))
   const user = await userRepository.findById(userId);
 
   if (!user) {

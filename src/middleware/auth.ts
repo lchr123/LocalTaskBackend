@@ -4,7 +4,7 @@ import { jwksRsaClient } from '../config/cognito';
 import { config } from '../config';
 import { query } from '../config/database';
 import { AuthenticatedRequest } from '../types/common';
-import { UnauthorizedError } from '../utils/errors';
+import { logger } from '../utils/logger';
 
 interface CognitoJwtPayload {
   sub: string;
@@ -23,6 +23,7 @@ interface CognitoJwtPayload {
 function getSigningKey(header: JwtHeader, callback: SigningKeyCallback): void {
   jwksRsaClient.getSigningKey(header.kid, (err, key) => {
     if (err) {
+      logger.error(String(err))
       callback(err);
       return;
     }
@@ -36,6 +37,7 @@ function getSigningKey(header: JwtHeader, callback: SigningKeyCallback): void {
  * Returns null if the header is missing or malformed.
  */
 function extractBearerToken(authHeader: string | undefined): string | null {
+  logger.info('authHeader: '+String(authHeader))
   if (!authHeader) {
     return null;
   }
@@ -44,6 +46,7 @@ function extractBearerToken(authHeader: string | undefined): string | null {
     return null;
   }
   const token = parts[1];
+  logger.info(token)
   if (!token || token.trim().length === 0) {
     return null;
   }
@@ -65,6 +68,7 @@ function verifyToken(token: string): Promise<CognitoJwtPayload> {
       },
       (err, decoded) => {
         if (err) {
+          logger.error(String(err))
           reject(err);
         } else {
           resolve(decoded as CognitoJwtPayload);
@@ -80,85 +84,43 @@ function verifyToken(token: string): Promise<CognitoJwtPayload> {
  */
 async function findOrCreateUser(
   cognitoSub: string,
-  email: string,
-  phone?: string
+  email?: string | null,
+  phone?: string | null
 ): Promise<string> {
-  // Try to find existing user
-  const findResult = await query<{ id: string }>(
-    'SELECT id FROM users WHERE cognito_sub = $1',
-    [cognitoSub]
-  );
-
-  if (findResult.rows.length > 0) {
-    return findResult.rows[0].id;
+  if (!cognitoSub) {
+    throw new Error('Missing Cognito sub');
   }
 
-  // Generate default nickname: 用户_<random 8 chars>
+  const normalizedEmail =
+    email && email.trim().length > 0 ? email.trim().toLowerCase() : null;
+
+  const normalizedPhone =
+    phone && phone.trim().length > 0 ? phone.trim() : null;
+
   const randomStr = Math.random().toString(36).slice(2, 10);
   const nickname = `用户_${randomStr}`;
 
-  // Create new user record or find existing by cognito_sub or email
-  // Uses a CTE to handle both unique constraints safely
-  const createResult = await query<{ id: string }>(
-    `WITH existing AS (
-       SELECT id FROM users WHERE cognito_sub = $1 OR email = $2 LIMIT 1
-     ),
-     inserted AS (
-       INSERT INTO users (cognito_sub, email, phone, nickname, average_rating, completed_task_count)
-       SELECT $1, $2, $3, $4, 0.0, 0
-       WHERE NOT EXISTS (SELECT 1 FROM existing)
-       ON CONFLICT (cognito_sub) DO UPDATE SET email = EXCLUDED.email
-       RETURNING id
-     )
-     SELECT id FROM inserted
-     UNION ALL
-     SELECT id FROM existing`,
-    [cognitoSub, email, phone || null, nickname]
+  const result = await query<{ id: string }>(
+    `
+    INSERT INTO users (
+      cognito_sub,
+      email,
+      phone,
+      nickname,
+      average_rating,
+      completed_task_count
+    )
+    VALUES ($1, $2, $3, $4, 0.0, 0)
+    ON CONFLICT (cognito_sub)
+    DO UPDATE SET
+      email = COALESCE(EXCLUDED.email, users.email),
+      phone = COALESCE(EXCLUDED.phone, users.phone)
+    RETURNING id
+    `,
+    [cognitoSub, normalizedEmail, normalizedPhone, nickname]
   );
 
-  if (createResult.rows.length > 0) {
-    // Also update cognito_sub if user was found by email (re-registration case)
-    await query(
-      `UPDATE users SET cognito_sub = $1 WHERE id = $2 AND cognito_sub != $1`,
-      [cognitoSub, createResult.rows[0].id]
-    );
-    return createResult.rows[0].id;
-  }
-
-  // Fallback: should not reach here, but just in case
-  const fallback = await query<{ id: string }>(
-    'SELECT id FROM users WHERE email = $1',
-    [email]
-  );
-  return fallback.rows[0].id;
-}
-
-/**
- * Mock auth middleware for local development.
- * When MOCK_AUTH=true, skips JWT verification and uses a fixed dev user.
- */
-async function mockAuthMiddleware(
-  req: AuthenticatedRequest,
-  _res: Response,
-  next: NextFunction
-): Promise<void> {
-  try {
-    const mockSub = 'dev-user-001';
-    const mockEmail = 'dev@localtask.local';
-
-    const userId = await findOrCreateUser(mockSub, mockEmail);
-
-    req.user = {
-      sub: mockSub,
-      email: mockEmail,
-      phone: undefined,
-      userId,
-    };
-
-    next();
-  } catch (error) {
-    next(error);
-  }
+  return result.rows[0].id;
 }
 
 /**
@@ -178,11 +140,6 @@ export async function authMiddleware(
   res: Response,
   next: NextFunction
 ): Promise<void> {
-  // Dev mode: skip JWT verification
-  if (process.env.MOCK_AUTH === 'true') {
-    return mockAuthMiddleware(req, res, next);
-  }
-
   try {
     const token = extractBearerToken(req.headers.authorization);
 
@@ -207,8 +164,15 @@ export async function authMiddleware(
 
     // Extract user info from JWT claims
     const sub = payload.sub;
-    const email = payload.email || '';
-    const phone = payload.phone_number;
+    const email =
+      typeof payload.email === 'string' && payload.email.trim().length > 0
+        ? payload.email
+        : null;
+
+    const phone =
+      typeof payload.phone_number === 'string' && payload.phone_number.trim().length > 0
+        ? payload.phone_number
+        : null;
 
     // Find or create user in database
     const userId = await findOrCreateUser(sub, email, phone);

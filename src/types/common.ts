@@ -15,8 +15,8 @@ export interface ApiError {
 export interface AuthenticatedRequest extends Request {
   user?: {
     sub: string;
-    email: string;
-    phone?: string;
+    email: string | null;
+    phone: string | null;
     userId: string;
   };
 }

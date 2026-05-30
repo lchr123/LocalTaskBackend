@@ -1,7 +1,7 @@
 -- Migration: 003_create_tasks
 -- Description: Create tasks table with PostGIS geography Point, CHECK constraints, and spatial indexes
 -- Requirements: 9.2, 9.5, 9.6, 9.7
-
+-- Up Migration
 CREATE TABLE tasks (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   poster_id         UUID NOT NULL REFERENCES users(id),
@@ -30,3 +30,14 @@ CREATE INDEX idx_tasks_created_at ON tasks(created_at DESC);
 
 -- Partial index for open tasks (most common query filter)
 CREATE INDEX idx_tasks_status_location ON tasks(status) WHERE status = 'open';
+
+
+-- Down Migration
+
+DROP INDEX IF EXISTS idx_tasks_status_location;
+DROP INDEX IF EXISTS idx_tasks_created_at;
+DROP INDEX IF EXISTS idx_tasks_poster_id;
+DROP INDEX IF EXISTS idx_tasks_status;
+DROP INDEX IF EXISTS idx_tasks_location;
+
+DROP TABLE IF EXISTS tasks;
