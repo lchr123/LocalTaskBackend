@@ -120,7 +120,16 @@ async function findOrCreateUser(
     [cognitoSub, normalizedEmail, normalizedPhone, nickname]
   );
 
-  return result.rows[0].id;
+  const userId = result.rows[0].id;
+
+  // Assign random DiceBear avatar if user doesn't have one yet
+  await query(
+    `UPDATE users SET avatar_url = $1, updated_at = NOW()
+     WHERE id = $2 AND avatar_url IS NULL`,
+    [`https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`, userId]
+  );
+
+  return userId;
 }
 
 /**

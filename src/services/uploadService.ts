@@ -10,7 +10,8 @@
  * Validates: Requirements 6.3, 6.4, 6.5, 6.6
  */
 
-import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import { config } from '../config';
@@ -46,7 +47,16 @@ export interface UploadedFile {
  *
  * Validates: Requirements 6.3, 6.4, 6.5, 6.6
  */
-export async function uploadImage(file: UploadedFile): Promise<string> {
+export type UploadFolder = 'avatars' | 'chats';
+
+/**
+ * Upload an image file to S3.
+ *
+ * @param file - The uploaded file object from multer
+ * @param folder - The S3 prefix folder ('avatars' or 'chats')
+ * @returns The accessible URL of the uploaded image
+ */
+export async function uploadImage(file: UploadedFile, folder: UploadFolder = 'chats'): Promise<string> {
   // Validate file format
   if (!ALLOWED_MIME_TYPES[file.mimetype]) {
     throw new AppError(422, 'invalid_file_type', '仅支持 JPEG 和 PNG 格式');
@@ -60,9 +70,9 @@ export async function uploadImage(file: UploadedFile): Promise<string> {
   // Generate unique filename: UUID + original extension
   const ext = path.extname(file.originalname).toLowerCase() || ALLOWED_MIME_TYPES[file.mimetype];
   const uniqueFilename = `${uuidv4()}${ext}`;
-  const key = `uploads/${uniqueFilename}`;
+  const key = `${folder}/${uniqueFilename}`;
 
-  // Upload to S3
+  // Upload to S3 (no ACL - use bucket policy for public access on avatars/)
   const command = new PutObjectCommand({
     Bucket: config.s3.bucket,
     Key: key,
@@ -78,9 +88,36 @@ export async function uploadImage(file: UploadedFile): Promise<string> {
 
   logger.info('Image uploaded successfully', {
     key,
+    folder,
     size: file.size,
     contentType: file.mimetype,
   });
 
   return url;
+}
+
+/**
+ * Generate a presigned URL for an S3 object given its full URL.
+ * The presigned URL is valid for 1 hour (3600 seconds).
+ *
+ * @param imageUrl - The full S3 URL (e.g., https://bucket.s3.region.amazonaws.com/uploads/uuid.jpg)
+ * @returns A presigned URL that allows temporary read access
+ */
+export async function getPresignedUrl(imageUrl: string): Promise<string> {
+  // Extract the key from the full S3 URL
+  const bucketPrefix = `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com/`;
+  if (!imageUrl.startsWith(bucketPrefix)) {
+    // Not an S3 URL from our bucket, return as-is
+    return imageUrl;
+  }
+
+  const key = imageUrl.slice(bucketPrefix.length);
+
+  const command = new GetObjectCommand({
+    Bucket: config.s3.bucket,
+    Key: key,
+  });
+
+  const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
+  return presignedUrl;
 }

@@ -3,6 +3,7 @@ import { logger } from '../utils/logger';
 import * as chatRepository from '../repositories/chatRepository';
 import * as connectionManager from './connectionManager';
 import * as notificationService from '../services/notificationService';
+import { getPresignedUrl } from '../services/uploadService';
 import { query } from '../config/database';
 
 /**
@@ -197,7 +198,19 @@ export async function handleMessage(
   const recipientWs = connectionManager.getConnection(recipientId);
 
   if (recipientWs) {
-    // Recipient is online — forward the message
+    // Recipient is online — forward the message with presigned URL for images
+    let forwardImageUrl = savedMessage.imageUrl;
+    if (savedMessage.type === 'image' && savedMessage.imageUrl) {
+      try {
+        forwardImageUrl = await getPresignedUrl(savedMessage.imageUrl);
+      } catch (err) {
+        logger.error('Failed to generate presigned URL', {
+          imageUrl: savedMessage.imageUrl,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+
     sendJson(recipientWs, {
       type: 'message',
       message: {
@@ -206,7 +219,7 @@ export async function handleMessage(
         senderId: savedMessage.senderId,
         content: savedMessage.content,
         type: savedMessage.type,
-        imageUrl: savedMessage.imageUrl,
+        imageUrl: forwardImageUrl,
         timestamp: savedMessage.timestamp,
         status: 'sent',
       },

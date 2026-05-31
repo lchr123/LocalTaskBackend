@@ -34,10 +34,11 @@ function mapRowToUser(row: UserRow): User {
  */
 export async function findByCognitoSub(sub: string): Promise<User | null> {
   const sql = `
-    SELECT id, cognito_sub, email, phone, nickname, avatar_url,
-           average_rating, completed_task_count, created_at, updated_at
-    FROM users
-    WHERE cognito_sub = $1
+    SELECT u.id, u.cognito_sub, u.email, u.phone, u.nickname, u.avatar_url,
+           u.average_rating, u.created_at, u.updated_at,
+           (SELECT COUNT(*) FROM tasks t WHERE t.selected_helper_id = u.id AND t.status = 'completed')::int AS completed_task_count
+    FROM users u
+    WHERE u.cognito_sub = $1
   `;
 
   const result = await query<UserRow>(sql, [sub]);
@@ -51,13 +52,15 @@ export async function findByCognitoSub(sub: string): Promise<User | null> {
 
 /**
  * Find a user by their internal UUID.
+ * completed_task_count is calculated from tasks table (not stored).
  */
 export async function findById(userId: string): Promise<User | null> {
   const sql = `
-    SELECT id, cognito_sub, email, phone, nickname, avatar_url,
-           average_rating, completed_task_count, created_at, updated_at
-    FROM users
-    WHERE id = $1
+    SELECT u.id, u.cognito_sub, u.email, u.phone, u.nickname, u.avatar_url,
+           u.average_rating, u.created_at, u.updated_at,
+           (SELECT COUNT(*) FROM tasks t WHERE t.selected_helper_id = u.id AND t.status = 'completed')::int AS completed_task_count
+    FROM users u
+    WHERE u.id = $1
   `;
 
   const result = await query<UserRow>(sql, [userId]);
@@ -72,6 +75,7 @@ export async function findById(userId: string): Promise<User | null> {
 /**
  * Create a new user record.
  * Uses ON CONFLICT to handle race conditions (idempotent).
+ * Assigns a random avatar using DiceBear API with the user's ID as seed.
  */
 export async function create(
   cognitoSub: string,
@@ -87,7 +91,22 @@ export async function create(
   `;
 
   const result = await query<UserRow>(sql, [cognitoSub, email, phone || null]);
-  return mapRowToUser(result.rows[0]);
+  const user = result.rows[0];
+
+  // If avatar_url is null (new user), assign a random DiceBear avatar
+  if (!user.avatar_url) {
+    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`;
+    const updateSql = `
+      UPDATE users SET avatar_url = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING id, cognito_sub, email, phone, nickname, avatar_url,
+                average_rating, completed_task_count, created_at, updated_at
+    `;
+    const updated = await query<UserRow>(updateSql, [avatarUrl, user.id]);
+    return mapRowToUser(updated.rows[0]);
+  }
+
+  return mapRowToUser(user);
 }
 
 /**

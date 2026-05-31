@@ -8,7 +8,7 @@ import * as taskRepository from '../repositories/taskRepository';
  */
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
   open: ['in_progress', 'cancelled'],
-  in_progress: ['completed', 'cancelled'],
+  in_progress: ['open', 'completed', 'cancelled'],  // open = cancel selection, return to hall
   completed: ['in_progress'],  // Allow poster to revert to in_progress
   cancelled: [],
 };
@@ -37,19 +37,30 @@ export interface ListTasksResponse {
 export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
   const { query: dbQuery } = await import('../config/database');
   const result = await dbQuery<Task>(
-    `SELECT id, poster_id AS "posterId", type, description,
-            location_address AS "locationAddress",
-            ST_Y(location::geometry) AS "latitude",
-            ST_X(location::geometry) AS "longitude",
-            reward, deadline, status, intent_count AS "intentCount",
-            selected_helper_id AS "selectedHelperId",
-            created_at AS "createdAt", updated_at AS "updatedAt"
-     FROM tasks
-     WHERE poster_id = $1
-     ORDER BY created_at DESC`,
+    `SELECT t.id, t.poster_id AS "posterId", t.type, t.description,
+            t.location_address AS "locationAddress",
+            ST_Y(t.location::geometry) AS "latitude",
+            ST_X(t.location::geometry) AS "longitude",
+            t.reward, t.deadline, t.status, t.intent_count AS "intentCount",
+            t.selected_helper_id AS "selectedHelperId",
+            t.created_at AS "createdAt", t.updated_at AS "updatedAt",
+            CASE WHEN r.id IS NOT NULL THEN true ELSE false END AS "hasReview"
+     FROM tasks t
+     LEFT JOIN reviews r ON r.task_id = t.id AND r.reviewer_id = $1
+     WHERE t.poster_id = $1
+     ORDER BY t.created_at DESC`,
     [userId]
   );
   return { tasks: result.rows };
+}
+
+/**
+ * List tasks accepted by a specific user (where user is the selected helper).
+ * Ordered by creation time (newest first).
+ */
+export async function listAcceptedTasks(userId: string): Promise<{ tasks: Task[] }> {
+  const tasks = await taskRepository.findAcceptedByUser(userId);
+  return { tasks };
 }
 
 /**
@@ -120,6 +131,15 @@ export async function updateTaskStatus(
   const allowedTransitions = VALID_TRANSITIONS[task.status];
   if (!allowedTransitions.includes(newStatus)) {
     throw new ConflictError('invalid_state_transition', '当前状态不允许此操作');
+  }
+
+  // When reverting to open, clear the selected helper (cancel selection)
+  if (newStatus === 'open') {
+    const updatedTask = await taskRepository.updateStatusAndClearHelper(taskId, newStatus);
+    if (!updatedTask) {
+      throw new NotFoundError('任務不存在');
+    }
+    return updatedTask;
   }
 
   const updatedTask = await taskRepository.updateStatus(taskId, newStatus);

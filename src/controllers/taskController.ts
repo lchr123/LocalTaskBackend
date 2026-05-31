@@ -60,6 +60,23 @@ router.get('/mine', authMiddleware as any, async (req: Request, res: Response, n
 });
 
 /**
+ * GET /tasks/accepted
+ * List tasks accepted by the current user (where user is the selected helper).
+ * Returns all tasks regardless of status, ordered by creation time (newest first).
+ */
+router.get('/accepted', authMiddleware as any, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user!.userId;
+
+    const result = await taskService.listAcceptedTasks(userId);
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /tasks/:id
  * Get a single task by ID.
  */

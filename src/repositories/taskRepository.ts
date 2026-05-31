@@ -227,6 +227,107 @@ export async function create(userId: string, payload: CreateTaskPayload): Promis
 }
 
 /**
+ * Update task status and clear the selected helper (revert to open).
+ * Also resets all selected and rejected intents back to pending.
+ */
+export async function updateStatusAndClearHelper(
+  taskId: string,
+  status: TaskStatus
+): Promise<Task | null> {
+  // Reset all selected and rejected intents back to pending
+  await query(
+    `UPDATE intents SET status = 'pending', updated_at = NOW()
+     WHERE task_id = $1 AND status IN ('selected', 'rejected')`,
+    [taskId]
+  );
+
+  const sql = `
+    UPDATE tasks
+    SET status = $2, selected_helper_id = NULL, updated_at = NOW()
+    WHERE id = $1
+    RETURNING id, poster_id, type, description, location_address,
+              ST_X(location::geometry) AS lng,
+              ST_Y(location::geometry) AS lat,
+              reward, deadline, status, intent_count,
+              selected_helper_id, created_at
+  `;
+
+  const result = await query<Omit<TaskRow, 'distance' | 'nickname' | 'average_rating'>>(sql, [taskId, status]);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const row = result.rows[0];
+
+  const userResult = await query<{ nickname: string; average_rating: string }>(
+    'SELECT nickname, average_rating FROM users WHERE id = $1',
+    [row.poster_id]
+  );
+  const user = userResult.rows[0];
+
+  return {
+    id: row.id,
+    posterId: row.poster_id,
+    posterNickname: user?.nickname ?? '',
+    posterRating: user ? parseFloat(user.average_rating) : 0,
+    type: row.type as Task['type'],
+    description: row.description,
+    location: {
+      address: row.location_address,
+      latitude: row.lat,
+      longitude: row.lng,
+    },
+    reward: parseFloat(row.reward),
+    deadline: row.deadline,
+    status: row.status as Task['status'],
+    intentCount: row.intent_count,
+    selectedHelperId: row.selected_helper_id ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+/**
+ * Find tasks accepted by a user (where user is the selected helper).
+ * Ordered by creation time (newest first).
+ */
+export async function findAcceptedByUser(userId: string): Promise<Task[]> {
+  const sql = `
+    SELECT t.id, t.poster_id, u.nickname, u.average_rating,
+           t.type, t.description, t.location_address,
+           ST_X(t.location::geometry) AS lng,
+           ST_Y(t.location::geometry) AS lat,
+           t.reward, t.deadline, t.status, t.intent_count,
+           t.selected_helper_id, t.created_at
+    FROM tasks t
+    JOIN users u ON t.poster_id = u.id
+    WHERE t.selected_helper_id = $1
+    ORDER BY t.created_at DESC
+  `;
+
+  const result = await query<Omit<TaskRow, 'distance'>>(sql, [userId]);
+  return result.rows.map((row) => ({
+    id: row.id,
+    posterId: row.poster_id,
+    posterNickname: row.nickname,
+    posterRating: parseFloat(row.average_rating),
+    type: row.type as Task['type'],
+    description: row.description,
+    location: {
+      address: row.location_address,
+      latitude: row.lat,
+      longitude: row.lng,
+    },
+    reward: parseFloat(row.reward),
+    deadline: row.deadline,
+    status: row.status as Task['status'],
+    intentCount: row.intent_count,
+    selectedHelperId: row.selected_helper_id ?? undefined,
+    createdAt: row.created_at,
+  }));
+}
+
+/**
  * Update task status and optionally set the selected helper.
  */
 export async function updateStatus(

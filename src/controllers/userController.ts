@@ -26,6 +26,22 @@ router.get(
 );
 
 /**
+ * GET /users/:id
+ * Returns a user's public profile by ID.
+ */
+router.get(
+  '/:id',
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const user = await userService.getProfile(req.params.id as string);
+      res.status(200).json(user);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * PATCH /users/me
  * Update the current authenticated user's nickname and/or avatarUrl.
  *

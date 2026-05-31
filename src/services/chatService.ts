@@ -4,6 +4,7 @@ import { calculateTotalPages } from '../utils/pagination';
 import * as chatRepository from '../repositories/chatRepository';
 import * as connectionManager from '../websocket/connectionManager';
 import * as notificationService from './notificationService';
+import { getPresignedUrl } from './uploadService';
 import { query } from '../config/database';
 
 /**
@@ -11,6 +12,21 @@ import { query } from '../config/database';
  *
  * Validates: Requirements 4.7, 4.8, 4.9, 4.10, 4.11
  */
+
+/**
+ * Enrich image messages with presigned URLs for secure access.
+ */
+async function enrichMessagesWithPresignedUrls(messages: ChatMessage[]): Promise<ChatMessage[]> {
+  return Promise.all(
+    messages.map(async (msg) => {
+      if (msg.type === 'image' && msg.imageUrl) {
+        const presignedUrl = await getPresignedUrl(msg.imageUrl);
+        return { ...msg, imageUrl: presignedUrl };
+      }
+      return msg;
+    })
+  );
+}
 
 /**
  * List all chat sessions for a user.
@@ -54,8 +70,11 @@ export async function listMessages(
 
   const totalPages = calculateTotalPages(totalCount, pageSize);
 
+  // Generate presigned URLs for image messages
+  const enrichedMessages = await enrichMessagesWithPresignedUrls(messages);
+
   return {
-    messages,
+    messages: enrichedMessages,
     page,
     totalPages,
   };
@@ -119,6 +138,11 @@ export async function sendMessage(
   const recipientWs = connectionManager.getConnection(recipientId);
 
   if (recipientWs) {
+    // Generate presigned URL for image messages before forwarding
+    const forwardImageUrl = message.type === 'image' && message.imageUrl
+      ? await getPresignedUrl(message.imageUrl)
+      : message.imageUrl;
+
     const forwardPayload = JSON.stringify({
       type: 'message',
       message: {
@@ -127,7 +151,7 @@ export async function sendMessage(
         senderId: message.senderId,
         content: message.content,
         type: message.type,
-        imageUrl: message.imageUrl,
+        imageUrl: forwardImageUrl,
         timestamp: message.timestamp,
         status: 'sent',
       },

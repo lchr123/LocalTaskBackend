@@ -31,7 +31,7 @@ router.post(
 
 /**
  * GET /users/:id/reviews
- * Get review summary for a user. No authentication required.
+ * Get review summary for a user (reviews received). No authentication required.
  *
  * Returns: { averageRating, totalReviews, reviews }
  *
@@ -46,6 +46,26 @@ export async function getUserReviews(
     const userId = req.params.id as string;
     const summary = await reviewService.getUserReviews(userId);
     res.status(200).json(summary);
+  } catch (err) {
+    next(err);
+  }
+}
+
+/**
+ * GET /users/:id/reviews-given
+ * Get reviews given by a user. No authentication required.
+ *
+ * Returns: { totalReviews, reviews }
+ */
+export async function getUserReviewsGiven(
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> {
+  try {
+    const userId = req.params.id as string;
+    const result = await reviewService.getUserReviewsGiven(userId);
+    res.status(200).json(result);
   } catch (err) {
     next(err);
   }

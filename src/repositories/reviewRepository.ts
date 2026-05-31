@@ -58,14 +58,27 @@ export async function create(
 
 /**
  * Find all reviews received by a user, ordered by created_at DESC.
- *
- * Validates: Requirements 5.7
  */
 export async function findByReviewee(userId: string): Promise<Review[]> {
   const sql = `
     SELECT id, task_id, reviewer_id, reviewee_id, rating, comment, created_at
     FROM reviews
     WHERE reviewee_id = $1
+    ORDER BY created_at DESC
+  `;
+
+  const result = await query<ReviewRow>(sql, [userId]);
+  return result.rows.map(mapRowToReview);
+}
+
+/**
+ * Find all reviews given by a user, ordered by created_at DESC.
+ */
+export async function findByReviewer(userId: string): Promise<Review[]> {
+  const sql = `
+    SELECT id, task_id, reviewer_id, reviewee_id, rating, comment, created_at
+    FROM reviews
+    WHERE reviewer_id = $1
     ORDER BY created_at DESC
   `;
 

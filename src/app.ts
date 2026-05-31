@@ -9,7 +9,7 @@ import { healthController } from './controllers/healthController';
 import { taskController } from './controllers/taskController';
 import { intentController, selectHelperRouter } from './controllers/intentController';
 import { chatController } from './controllers/chatController';
-import { reviewController, getUserReviews } from './controllers/reviewController';
+import { reviewController, getUserReviews, getUserReviewsGiven } from './controllers/reviewController';
 import { reportController } from './controllers/reportController';
 import { uploadController } from './controllers/uploadController';
 import { userController } from './controllers/userController';
@@ -86,6 +86,9 @@ app.use('/reviews', reviewController);
 
 // User reviews route (GET /users/:id/reviews)
 app.get('/users/:id/reviews', getUserReviews);
+
+// User reviews given route (GET /users/:id/reviews-given)
+app.get('/users/:id/reviews-given', getUserReviewsGiven);
 
 // Report routes
 app.use('/reports', reportController);

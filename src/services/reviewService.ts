@@ -155,19 +155,11 @@ export async function submitReview(
 }
 
 /**
- * Get review summary for a user.
- *
- * Returns:
- * - averageRating: the user's current average rating
- * - totalReviews: total number of reviews received
- * - reviews: all reviews ordered by createdAt DESC
- *
- * Validates: Requirements 5.7
+ * Get review summary for a user (reviews received).
  */
 export async function getUserReviews(userId: string): Promise<ReviewSummary> {
   const reviews = await reviewRepository.findByReviewee(userId);
 
-  // Calculate averageRating from the reviews list
   let averageRating = 0;
   if (reviews.length > 0) {
     const sum = reviews.reduce((acc, r) => acc + r.rating, 0);
@@ -176,6 +168,17 @@ export async function getUserReviews(userId: string): Promise<ReviewSummary> {
 
   return {
     averageRating,
+    totalReviews: reviews.length,
+    reviews,
+  };
+}
+
+/**
+ * Get reviews given by a user.
+ */
+export async function getUserReviewsGiven(userId: string): Promise<{ totalReviews: number; reviews: Review[] }> {
+  const reviews = await reviewRepository.findByReviewer(userId);
+  return {
     totalReviews: reviews.length,
     reviews,
   };

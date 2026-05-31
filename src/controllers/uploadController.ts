@@ -50,7 +50,9 @@ router.post(
         size: req.file.size,
       };
 
-      const url = await uploadService.uploadImage(file);
+      // Determine folder from query param: ?folder=avatars or default to 'chats'
+      const folder = (req.query.folder as string) === 'avatars' ? 'avatars' : 'chats';
+      const url = await uploadService.uploadImage(file, folder as uploadService.UploadFolder);
       res.status(200).json({ url });
     } catch (err) {
       next(err);
