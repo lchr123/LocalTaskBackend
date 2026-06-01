@@ -5,6 +5,4 @@ coverage/
 *.log
 .DS_Store
 ./command.md
-docker-compose.yml
-dockerfile-prod
 *.pem
