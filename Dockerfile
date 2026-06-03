@@ -12,6 +12,7 @@ RUN npm install
 # Copy production dependencies and built output
 COPY ./dist ./dist
 COPY ./migrations ./migrations
+RUN npm run migrate:up
 
 # Set environment
 ENV NODE_ENV=production
