@@ -1,26 +1,19 @@
 import { z } from 'zod';
 
 /**
- * Valid task type enum values.
- */
-const TASK_TYPES = ['delivery', 'shopping', 'dog_walking', 'queuing', 'pickup'] as const;
-
-/**
  * Zod schema for validating the CreateTaskPayload request body.
  *
  * Validates:
- * - type: must be one of the allowed TaskType enum values
+ * - type: non-empty string (no DB constraint, frontend controls valid values)
  * - description: string between 10 and 500 characters
  * - location: object with address, latitude (-90 to 90), longitude (-180 to 180)
- * - reward: number between 0.01 and 99999.99
+ * - reward: integer between 1000 and 99999
  * - deadline: ISO 8601 datetime string that must be in the future
  *
  * Validates: Requirements 2.6, 2.7
  */
 export const createTaskSchema = z.object({
-  type: z.enum(TASK_TYPES, {
-    error: 'タスクタイプは delivery, shopping, dog_walking, queuing, pickup のいずれかである必要があります',
-  }),
+  type: z.string({ error: 'タスクタイプは必須です' }).min(1, 'タスクタイプは必須です'),
 
   description: z
     .string({ error: '説明は文字列である必要があります' })
@@ -101,10 +94,10 @@ export const taskQuerySchema = z.object({
     .coerce
     .number()
     .min(0.1, '検索半径は0.1km以上である必要があります')
-    .max(50, '検索半径は50km以下である必要があります')
-    .default(10),
+    .max(100, '検索半径は100km以下である必要があります')
+    .default(100),
 
-  type: z.enum(TASK_TYPES).optional(),
+  type: z.string().optional(),
 
   minReward: z
     .coerce
@@ -132,6 +125,10 @@ export const taskQuerySchema = z.object({
     .min(1)
     .max(50)
     .default(20),
+
+  sort: z
+    .enum(['distance', 'reward', 'newest', 'deadline'])
+    .default('distance'),
 });
 
 /**

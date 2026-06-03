@@ -5,8 +5,7 @@
 CREATE TABLE tasks (
   id                UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   poster_id         UUID NOT NULL REFERENCES users(id),
-  type              VARCHAR(20) NOT NULL
-                    CHECK (type IN ('delivery', 'shopping', 'dog_walking', 'queuing', 'pickup')),
+  type              VARCHAR(20) NOT NULL,
   description       TEXT NOT NULL CHECK (char_length(description) BETWEEN 10 AND 500),
   location_address  VARCHAR(200) NOT NULL,
   location          geography(Point, 4326) NOT NULL,

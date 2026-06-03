@@ -20,6 +20,7 @@ export interface ListTasksParams {
   type?: string;
   minReward?: number;
   maxReward?: number;
+  sort?: string;
   page: number;
   pageSize: number;
 }
@@ -67,11 +68,11 @@ export async function listAcceptedTasks(userId: string): Promise<{ tasks: Task[]
  * List nearby open tasks with filtering and pagination.
  */
 export async function listTasks(params: ListTasksParams): Promise<ListTasksResponse> {
-  const { lat, lng, radius, type, minReward, maxReward, page, pageSize } = params;
+  const { lat, lng, radius, type, minReward, maxReward, sort, page, pageSize } = params;
   const offset = (page - 1) * pageSize;
 
   const [tasks, totalCount] = await Promise.all([
-    taskRepository.findNearby({ lat, lng, radius, type, minReward, maxReward, pageSize, offset }),
+    taskRepository.findNearby({ lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset }),
     taskRepository.countNearby({ lat, lng, radius, type, minReward, maxReward }),
   ]);
 

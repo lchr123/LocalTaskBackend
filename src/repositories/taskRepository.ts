@@ -8,6 +8,7 @@ export interface FindNearbyParams {
   type?: string;
   minReward?: number;
   maxReward?: number;
+  sort?: string;
   pageSize: number;
   offset: number;
 }
@@ -60,7 +61,16 @@ function mapRowToTask(row: TaskRow): Task {
  * Supports filtering by type and reward range, ordered by distance.
  */
 export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
-  const { lat, lng, radius, type, minReward, maxReward, pageSize, offset } = params;
+  const { lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset } = params;
+
+  // Dynamic ORDER BY based on sort parameter
+  let orderBy = 'distance ASC'; // default
+  switch (sort) {
+    case 'reward': orderBy = 't.reward DESC'; break;
+    case 'newest': orderBy = 't.created_at DESC'; break;
+    case 'deadline': orderBy = 't.deadline ASC'; break;
+    default: orderBy = 'distance ASC';
+  }
 
   const sql = `
     SELECT t.id, t.poster_id, u.nickname, u.average_rating,
@@ -74,10 +84,10 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
     JOIN users u ON t.poster_id = u.id
     WHERE t.status = 'open'
       AND ST_DWithin(t.location, ST_SetSRID(ST_MakePoint($1, $2), 4326), $3 * 1000)
-      AND ($4::varchar IS NULL OR t.type = $4)
+      AND ($4::text[] IS NULL OR t.type = ANY($4::text[]))
       AND ($5::numeric IS NULL OR t.reward >= $5)
       AND ($6::numeric IS NULL OR t.reward <= $6)
-    ORDER BY distance ASC
+    ORDER BY ${orderBy}
     LIMIT $7 OFFSET $8
   `;
 
@@ -85,7 +95,7 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
     lng,          // $1
     lat,          // $2
     radius,       // $3
-    type ?? null, // $4
+    type ? type.split(',') : null, // $4 - array of types or null
     minReward ?? null, // $5
     maxReward ?? null, // $6
     pageSize,     // $7
@@ -108,7 +118,7 @@ export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'o
     FROM tasks t
     WHERE t.status = 'open'
       AND ST_DWithin(t.location, ST_SetSRID(ST_MakePoint($1, $2), 4326), $3 * 1000)
-      AND ($4::varchar IS NULL OR t.type = $4)
+      AND ($4::text[] IS NULL OR t.type = ANY($4::text[]))
       AND ($5::numeric IS NULL OR t.reward >= $5)
       AND ($6::numeric IS NULL OR t.reward <= $6)
   `;
@@ -117,7 +127,7 @@ export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'o
     lng,          // $1
     lat,          // $2
     radius,       // $3
-    type ?? null, // $4
+    type ? type.split(',') : null, // $4 - array of types or null
     minReward ?? null, // $5
     maxReward ?? null, // $6
   ];

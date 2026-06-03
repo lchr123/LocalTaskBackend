@@ -1,4 +1,4 @@
-export type TaskType = 'delivery' | 'shopping' | 'dog_walking' | 'queuing' | 'pickup';
+export type TaskType = string;
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
 
 export interface Task {
