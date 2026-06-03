@@ -10,6 +10,7 @@ interface SessionRow {
   poster_id: string;
   helper_id: string;
   task_title: string;
+  task_type: string | null;
   participant_id: string;
   participant_nickname: string;
   participant_avatar_url: string | null;
@@ -51,6 +52,7 @@ function mapRowToSession(row: SessionRow): ChatSession {
     id: row.id,
     taskId: row.task_id,
     taskTitle: row.task_title,
+    taskType: row.task_type ?? undefined,
     participantId: row.participant_id,
     participantNickname: row.participant_nickname,
     participantAvatarUrl: row.participant_avatar_url ?? undefined,
@@ -89,6 +91,7 @@ export async function findSessionsByUserId(userId: string): Promise<ChatSession[
       cs.poster_id,
       cs.helper_id,
       COALESCE(LEFT(t.description, 50), '') AS task_title,
+      t.type AS task_type,
       CASE
         WHEN cs.poster_id = $1 THEN cs.helper_id
         ELSE cs.poster_id

@@ -2,6 +2,7 @@ export interface ChatSession {
   id: string;
   taskId: string;
   taskTitle: string;
+  taskType?: string;
   participantId: string;
   participantNickname: string;
   participantAvatarUrl?: string;

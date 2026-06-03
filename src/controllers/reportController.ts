@@ -3,6 +3,7 @@ import { authMiddleware } from '../middleware/auth';
 import { validate } from '../middleware/validation';
 import { createReportSchema } from '../validators/reportValidator';
 import * as reportService from '../services/reportService';
+import * as reportRepository from '../repositories/reportRepository';
 import { AuthenticatedRequest } from '../types/common';
 
 const router = Router();
@@ -23,6 +24,25 @@ router.post(
       const authReq = req as AuthenticatedRequest;
       const report = await reportService.submitReport(authReq.user!.userId, req.body);
       res.status(201).json(report);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * GET /reports/mine
+ * Fetch all reports submitted by the current user.
+ * Requires authentication.
+ */
+router.get(
+  '/mine',
+  authMiddleware as any,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const reports = await reportRepository.findByReporterId(authReq.user!.userId);
+      res.json({ reports });
     } catch (err) {
       next(err);
     }

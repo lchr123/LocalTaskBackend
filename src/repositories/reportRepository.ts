@@ -60,3 +60,31 @@ export async function create(
   const result = await query<ReportRow>(sql, values);
   return mapRowToReport(result.rows[0]);
 }
+
+/**
+ * Find all reports submitted by a user, ordered by created_at DESC.
+ * JOINs tasks/users to get the target name for display.
+ */
+export async function findByReporterId(reporterId: string): Promise<(Report & { targetName?: string })[]> {
+  const sql = `
+    SELECT
+      r.id, r.reporter_id, r.target_type, r.target_id,
+      r.type, r.description, r.image_urls, r.status, r.created_at,
+      CASE
+        WHEN r.target_type = 'task' THEN LEFT(t.description, 30)
+        WHEN r.target_type = 'user' THEN u_target.nickname
+        ELSE NULL
+      END AS target_name
+    FROM reports r
+    LEFT JOIN tasks t ON r.target_type = 'task' AND r.target_id = t.id
+    LEFT JOIN users u_target ON r.target_type = 'user' AND r.target_id = u_target.id
+    WHERE r.reporter_id = $1
+    ORDER BY r.created_at DESC
+  `;
+
+  const result = await query<ReportRow & { target_name?: string }>(sql, [reporterId]);
+  return result.rows.map((row) => ({
+    ...mapRowToReport(row),
+    targetName: row.target_name ?? undefined,
+  }));
+}
