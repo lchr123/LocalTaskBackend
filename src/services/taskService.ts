@@ -114,6 +114,44 @@ export async function createTask(userId: string, payload: CreateTaskPayload): Pr
 }
 
 /**
+ * Update task details (description, reward, location, deadline).
+ * Only the task poster can edit, and only when status is 'open'.
+ */
+export async function updateTask(
+  taskId: string,
+  userId: string,
+  payload: { description?: string; reward?: number; location?: { address: string; latitude: number; longitude: number }; deadline?: string }
+): Promise<Task> {
+  const task = await taskRepository.findById(taskId);
+
+  if (!task) {
+    throw new NotFoundError('任务不存在');
+  }
+
+  if (task.posterId !== userId) {
+    throw new ConflictError('forbidden', '无权编辑此任务');
+  }
+
+  if (task.status !== 'open') {
+    throw new ConflictError('invalid_state', '只有待接单状态的任务可以编辑');
+  }
+
+  if (payload.deadline) {
+    const deadlineDate = new Date(payload.deadline);
+    if (deadlineDate <= new Date()) {
+      throw new ValidationError({ deadline: '截止时间必须晚于当前时间' });
+    }
+  }
+
+  const updatedTask = await taskRepository.updateDetails(taskId, payload);
+  if (!updatedTask) {
+    throw new NotFoundError('任务不存在或状态已变更');
+  }
+
+  return updatedTask;
+}
+
+/**
  * Update a task's status with state machine validation.
  * Throws NotFoundError if the task does not exist.
  * Throws ConflictError if the state transition is invalid.

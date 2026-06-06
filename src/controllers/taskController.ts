@@ -110,6 +110,39 @@ router.post(
 );
 
 /**
+ * PATCH /tasks/:id
+ * Update task details (description, reward, location).
+ * Only the task poster can edit, and only when status is 'open'.
+ */
+router.patch(
+  '/:id',
+  authMiddleware as any,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const taskId = req.params.id as string;
+      const { description, reward, location, deadline } = req.body;
+
+      if (!description && reward === undefined && !location && !deadline) {
+        res.status(422).json({ error: 'validation_error', message: '请提供需要修改的字段' });
+        return;
+      }
+
+      const payload: { description?: string; reward?: number; location?: { address: string; latitude: number; longitude: number }; deadline?: string } = {};
+      if (description) payload.description = description;
+      if (reward !== undefined) payload.reward = reward;
+      if (location) payload.location = location;
+      if (deadline) payload.deadline = deadline;
+
+      const updatedTask = await taskService.updateTask(taskId, authReq.user!.userId, payload);
+      res.status(200).json(updatedTask);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * PATCH /tasks/:id/status
  * Update task status. Only the task poster can change status.
  * Allowed transitions: in_progress ↔ completed, in_progress → cancelled

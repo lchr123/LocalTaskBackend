@@ -126,7 +126,7 @@ async function findOrCreateUser(
   await query(
     `UPDATE users SET avatar_url = $1, updated_at = NOW()
      WHERE id = $2 AND avatar_url IS NULL`,
-    [`https://api.dicebear.com/7.x/avataaars/svg?seed=${userId}`, userId]
+    [`https://api.dicebear.com/7.x/thumbs/svg?seed=${userId}`, userId]
   );
 
   return userId;

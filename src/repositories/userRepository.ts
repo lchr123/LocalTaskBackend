@@ -95,7 +95,7 @@ export async function create(
 
   // If avatar_url is null (new user), assign a random DiceBear avatar
   if (!user.avatar_url) {
-    const avatarUrl = `https://api.dicebear.com/7.x/avataaars/svg?seed=${user.id}`;
+    const avatarUrl = `https://api.dicebear.com/7.x/thumbs/svg?seed=${user.id}`;
     const updateSql = `
       UPDATE users SET avatar_url = $1, updated_at = NOW()
       WHERE id = $2

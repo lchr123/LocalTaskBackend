@@ -237,6 +237,93 @@ export async function create(userId: string, payload: CreateTaskPayload): Promis
 }
 
 /**
+ * Update task details (description, reward, location, deadline).
+ * Only allowed when task status is 'open'.
+ */
+export async function updateDetails(
+  taskId: string,
+  payload: { description?: string; reward?: number; location?: { address: string; latitude: number; longitude: number }; deadline?: string }
+): Promise<Task | null> {
+  const setClauses: string[] = ['updated_at = NOW()'];
+  const values: any[] = [taskId];
+  let paramIndex = 2;
+
+  if (payload.description !== undefined) {
+    setClauses.push(`description = $${paramIndex}`);
+    values.push(payload.description);
+    paramIndex++;
+  }
+
+  if (payload.reward !== undefined) {
+    setClauses.push(`reward = $${paramIndex}`);
+    values.push(payload.reward);
+    paramIndex++;
+  }
+
+  if (payload.deadline !== undefined) {
+    setClauses.push(`deadline = $${paramIndex}`);
+    values.push(payload.deadline);
+    paramIndex++;
+  }
+
+  if (payload.location) {
+    setClauses.push(`location_address = $${paramIndex}`);
+    values.push(payload.location.address);
+    paramIndex++;
+    setClauses.push(`location = ST_SetSRID(ST_MakePoint($${paramIndex}, $${paramIndex + 1}), 4326)`);
+    values.push(payload.location.longitude);
+    paramIndex++;
+    values.push(payload.location.latitude);
+    paramIndex++;
+  }
+
+  const sql = `
+    UPDATE tasks
+    SET ${setClauses.join(', ')}
+    WHERE id = $1 AND status = 'open'
+    RETURNING id, poster_id, type, description, location_address,
+              ST_X(location::geometry) AS lng,
+              ST_Y(location::geometry) AS lat,
+              reward, deadline, status, intent_count,
+              selected_helper_id, created_at
+  `;
+
+  const result = await query<Omit<TaskRow, 'distance' | 'nickname' | 'average_rating'>>(sql, values);
+
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const row = result.rows[0];
+
+  const userResult = await query<{ nickname: string; average_rating: string }>(
+    'SELECT nickname, average_rating FROM users WHERE id = $1',
+    [row.poster_id]
+  );
+  const user = userResult.rows[0];
+
+  return {
+    id: row.id,
+    posterId: row.poster_id,
+    posterNickname: user?.nickname ?? '',
+    posterRating: user ? parseFloat(user.average_rating) : 0,
+    type: row.type as Task['type'],
+    description: row.description,
+    location: {
+      address: row.location_address,
+      latitude: row.lat,
+      longitude: row.lng,
+    },
+    reward: parseFloat(row.reward),
+    deadline: row.deadline,
+    status: row.status as Task['status'],
+    intentCount: row.intent_count,
+    selectedHelperId: row.selected_helper_id ?? undefined,
+    createdAt: row.created_at,
+  };
+}
+
+/**
  * Update task status and clear the selected helper (revert to open).
  * Also resets all selected and rejected intents back to pending.
  */
