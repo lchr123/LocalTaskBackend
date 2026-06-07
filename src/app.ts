@@ -13,6 +13,7 @@ import { reviewController, getUserReviews, getUserReviewsGiven } from './control
 import { reportController } from './controllers/reportController';
 import { uploadController } from './controllers/uploadController';
 import { userController } from './controllers/userController';
+import { adminController } from './controllers/adminController';
 import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 
@@ -98,6 +99,9 @@ app.use('/upload', uploadController);
 
 // User routes
 app.use('/users', userController);
+
+// Admin routes
+app.use('/admin', adminController);
 
 // --- Global Error Handler (must be registered AFTER routes) ---
 app.use(errorHandler);

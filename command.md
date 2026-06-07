@@ -27,3 +27,11 @@ docker compose down --rmi all --remove-orphans
 # prod DB migration
 sudo docker exec -it local-task-backend npm run migrate:up
 sudo docker exec -it local-task-backend npm run migrate:down
+
+# Admin Panel Build & Deploy
+cd admin && npm install && npm run build && cd ..
+scp -i ./LightsailDefaultKey-ap-northeast-1.pem -r ./admin/dist ubuntu@54.238.163.28:/home/ubuntu/localtaskbackend/admin-dist
+
+# Then on the frontend repo side, copy admin-dist into the nginx build context:
+# cp -r admin-dist/ into LocalTaskApp/ before rebuilding nginx container
+# Or on server: docker cp admin-dist nginx:/var/www/admin/

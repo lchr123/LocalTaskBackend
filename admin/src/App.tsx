@@ -1,0 +1,553 @@
+import React, { useState, useEffect } from 'react';
+
+const API_BASE = '/api/admin';
+
+// Inject table cell styles globally
+const globalStyle = document.createElement('style');
+globalStyle.textContent = `
+  table th, table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #eee;
+    border-right: 1px solid #f0f0f0;
+    text-align: left;
+  }
+  table th {
+    background: #fafafa;
+    font-weight: 600;
+    border-bottom: 2px solid #ddd;
+  }
+  table th:last-child, table td:last-child {
+    border-right: none;
+  }
+  table tr:hover td {
+    background: #f9f9f9;
+  }
+`;
+document.head.appendChild(globalStyle);
+
+function getToken(): string | null {
+  return localStorage.getItem('admin_token');
+}
+
+function setToken(token: string) {
+  localStorage.setItem('admin_token', token);
+}
+
+function clearToken() {
+  localStorage.removeItem('admin_token');
+}
+
+async function apiRequest(path: string, options: RequestInit = {}) {
+  const token = getToken();
+  const res = await fetch(`${API_BASE}${path}`, {
+    ...options,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...options.headers,
+    },
+  });
+  if (res.status === 401) {
+    clearToken();
+    window.location.reload();
+    throw new Error('未授权');
+  }
+  return res.json();
+}
+
+// ─── Login Page ──────────────────────────────────────────────────────────────
+
+function LoginPage({ onLogin }: { onLogin: () => void }) {
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+    try {
+      const data = await apiRequest('/login', {
+        method: 'POST',
+        body: JSON.stringify({ username, password }),
+      });
+      if (data.token) {
+        setToken(data.token);
+        onLogin();
+      } else {
+        setError(data.message || '登录失败');
+      }
+    } catch {
+      setError('登录失败，请检查网络');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={styles.loginContainer}>
+      <form onSubmit={handleSubmit} style={styles.loginForm}>
+        <h2 style={{ textAlign: 'center', marginBottom: 24 }}>🔐 管理后台</h2>
+        {error && <p style={styles.error}>{error}</p>}
+        <input
+          type="text"
+          placeholder="用户名"
+          value={username}
+          onChange={(e) => setUsername(e.target.value)}
+          style={styles.input}
+        />
+        <input
+          type="password"
+          placeholder="密码"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          style={styles.input}
+        />
+        <button type="submit" disabled={loading} style={styles.button}>
+          {loading ? '登录中...' : '登录'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+// ─── Dashboard ───────────────────────────────────────────────────────────────
+
+function Dashboard() {
+  const [tab, setTab] = useState<'users' | 'tasks' | 'reports' | 'chats' | 'reviews'>('users');
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(false);
+  const [page, setPage] = useState(1);
+  const [statusFilter, setStatusFilter] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedTask, setSelectedTask] = useState<any>(null);
+  const [selectedChat, setSelectedChat] = useState<any>(null);
+  const [chatMessages, setChatMessages] = useState<any[]>([]);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+  const [selectedReview, setSelectedReview] = useState<any>(null);
+
+  useEffect(() => {
+    loadData();
+  }, [tab, page, statusFilter, searchQuery]);
+
+  const loadData = async () => {
+    setLoading(true);
+    try {
+      const params = new URLSearchParams({ page: String(page), pageSize: '20' });
+      if (statusFilter) params.set('status', statusFilter);
+      if ((tab === 'tasks' || tab === 'users' || tab === 'chats') && searchQuery) params.set('search', searchQuery);
+      const result = await apiRequest(`/${tab}?${params}`);
+      setData(result);
+    } catch {
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadChatMessages = async (chat: any) => {
+    setSelectedChat(chat);
+    setLoadingMessages(true);
+    try {
+      const result = await apiRequest(`/chats/${chat.id}/messages`);
+      setChatMessages(result.messages || []);
+    } catch {
+      setChatMessages([]);
+    } finally {
+      setLoadingMessages(false);
+    }
+  };
+
+  const handleStatusChange = async (id: string, newStatus: string) => {
+    if (!confirm(`确定将状态改为「${newStatus}」？`)) return;
+    try {
+      if (tab === 'tasks') {
+        await apiRequest(`/tasks/${id}/status`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: newStatus }),
+        });
+      } else if (tab === 'reports') {
+        await apiRequest(`/reports/${id}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: newStatus }),
+        });
+      }
+      loadData();
+    } catch {
+      alert('操作失败');
+    }
+  };
+
+  const handleLogout = () => {
+    clearToken();
+    window.location.reload();
+  };
+
+  return (
+    <div style={styles.dashboard}>
+      <header style={styles.header}>
+        <h1 style={{ margin: 0, fontSize: 18 }}>LocallyHelper 管理后台</h1>
+        <button onClick={handleLogout} style={styles.logoutBtn}>退出</button>
+      </header>
+
+      <nav style={styles.nav}>
+        {(['users', 'tasks', 'reports', 'chats', 'reviews'] as const).map((t) => (
+          <button
+            key={t}
+            onClick={() => { setTab(t); setPage(1); setStatusFilter(''); setSearchQuery(''); }}
+            style={{ ...styles.navBtn, ...(tab === t ? styles.navBtnActive : {}) }}
+          >
+            {{ users: '👤 用户', tasks: '📋 任务', reports: '🚨 投诉', chats: '💬 对话', reviews: '⭐ 评价' }[t]}
+          </button>
+        ))}
+      </nav>
+
+      {tab === 'users' && (
+        <div style={styles.filters}>
+          <input
+            type="text"
+            placeholder="搜索 Cognito Sub..."
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+            style={styles.searchInput}
+          />
+        </div>
+      )}
+
+      {tab === 'tasks' && (
+        <div style={styles.filters}>
+          <input
+            type="text"
+            placeholder="搜索任务 ID..."
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+            style={styles.searchInput}
+          />
+          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} style={styles.select}>
+            <option value="">全部状态</option>
+            <option value="open">待接单</option>
+            <option value="in_progress">进行中</option>
+            <option value="completed">已完成</option>
+            <option value="cancelled">已取消</option>
+          </select>
+        </div>
+      )}
+
+      {tab === 'reports' && (
+        <div style={styles.filters}>
+          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} style={styles.select}>
+            <option value="">全部状态</option>
+            <option value="submitted">待处理</option>
+            <option value="reviewing">处理中</option>
+            <option value="resolved">已处理</option>
+          </select>
+        </div>
+      )}
+
+      {tab === 'chats' && (
+        <div style={styles.filters}>
+          <input
+            type="text"
+            placeholder="搜索 Poster Cognito Sub..."
+            value={searchQuery}
+            onChange={(e) => { setSearchQuery(e.target.value); setPage(1); }}
+            style={styles.searchInput}
+          />
+        </div>
+      )}
+
+      {loading ? (
+        <p style={{ textAlign: 'center', padding: 40 }}>加载中...</p>
+      ) : (
+        <div style={styles.tableContainer}>
+          {tab === 'users' && data?.users && (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th>Cognito Sub</th><th>昵称</th><th>邮箱</th><th>手机</th><th>评分</th><th>完成任务</th><th>注册时间</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.users.map((u: any) => (
+                  <tr key={u.id}>
+                    <td style={styles.idCell}>{u.cognito_sub || '-'}</td>
+                    <td>{u.nickname || '-'}</td>
+                    <td>{u.email || '-'}</td>
+                    <td>{u.phone || '-'}</td>
+                    <td>{u.average_rating}</td>
+                    <td>{u.completed_task_count}</td>
+                    <td>{new Date(u.created_at).toLocaleString('ja-JP', { hour12: false })}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {tab === 'tasks' && data?.tasks && (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th>发布者</th><th>类型</th><th>描述</th><th>报酬</th><th>状态</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.tasks.map((t: any) => (
+                  <tr key={t.id}>
+                    <td>{t.poster_nickname}</td>
+                    <td>{t.type}</td>
+                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</td>
+                    <td>¥{t.reward}</td>
+                    <td><span style={{ ...styles.badge, backgroundColor: statusColor(t.status) }}>{statusLabel(t.status)}</span></td>
+                    <td style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => setSelectedTask(t)} style={styles.detailBtn}>查看详情</button>
+                      <select
+                        value=""
+                        onChange={(e) => { if (e.target.value) handleStatusChange(t.id, e.target.value); }}
+                        style={styles.select}
+                      >
+                        <option value="">修改状态</option>
+                        <option value="open">待接单</option>
+                        <option value="in_progress">进行中</option>
+                        <option value="completed">已完成</option>
+                        <option value="cancelled">已取消</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* Task Detail Modal */}
+          {selectedTask && (
+            <div style={styles.modalOverlay} onClick={() => setSelectedTask(null)}>
+              <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                  <h3 style={{ margin: 0 }}>任务详情</h3>
+                  <button onClick={() => setSelectedTask(null)} style={styles.closeBtn}>✕</button>
+                </div>
+                <div style={styles.modalBody}>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>任务 ID</span><span style={styles.detailValue}>{selectedTask.id}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>发布者</span><span style={styles.detailValue}>{selectedTask.poster_nickname} ({selectedTask.poster_email || '-'})</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>发布者 ID</span><span style={styles.detailValue}>{selectedTask.poster_id}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>类型</span><span style={styles.detailValue}>{selectedTask.type}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>状态</span><span style={styles.detailValue}><span style={{ ...styles.badge, backgroundColor: statusColor(selectedTask.status) }}>{statusLabel(selectedTask.status)}</span></span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>描述</span><span style={styles.detailValue}>{selectedTask.description}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>地址</span><span style={styles.detailValue}>{selectedTask.location_address || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>报酬</span><span style={styles.detailValue}>¥{selectedTask.reward}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>截止时间</span><span style={styles.detailValue}>{selectedTask.deadline ? new Date(selectedTask.deadline).toLocaleString('ja-JP', { hour12: false }) : '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>意向人数</span><span style={styles.detailValue}>{selectedTask.intent_count}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>选中帮手 ID</span><span style={styles.detailValue}>{selectedTask.selected_helper_id || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>创建时间</span><span style={styles.detailValue}>{new Date(selectedTask.created_at).toLocaleString('ja-JP', { hour12: false })}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>更新时间</span><span style={styles.detailValue}>{selectedTask.updated_at ? new Date(selectedTask.updated_at).toLocaleString('ja-JP', { hour12: false }) : '-'}</span></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Chat Messages Modal */}
+          {selectedChat && (
+            <div style={styles.modalOverlay} onClick={() => setSelectedChat(null)}>
+              <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                  <h3 style={{ margin: 0 }}>对话记录</h3>
+                  <button onClick={() => setSelectedChat(null)} style={styles.closeBtn}>✕</button>
+                </div>
+                <div style={styles.modalBody}>
+                  {loadingMessages ? (
+                    <p style={{ textAlign: 'center', padding: 20 }}>加载中...</p>
+                  ) : chatMessages.length === 0 ? (
+                    <p style={{ textAlign: 'center', padding: 20, color: '#999' }}>暂无消息记录</p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {chatMessages.map((m: any) => (
+                        <div key={m.id} style={{ padding: '8px 12px', borderRadius: 6, background: '#f5f5f5' }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+                            <span style={{ fontSize: 12, fontWeight: 600, color: '#555' }}>{m.sender_nickname} ({m.sender_cognito_sub})</span>
+                            <span style={{ fontSize: 11, color: '#999' }}>{new Date(m.timestamp).toLocaleString('ja-JP', { hour12: false })}</span>
+                          </div>
+                          {m.type === 'image' ? (
+                            <img src={m.image_url} alt="图片" style={{ maxWidth: 200, borderRadius: 4 }} />
+                          ) : (
+                            <p style={{ margin: 0, fontSize: 13 }}>{m.content}</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'reports' && data?.reports && (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th>ID</th><th>举报人</th><th>类型</th><th>举报目标ID</th><th>描述</th><th>状态</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.reports.map((r: any) => (
+                  <tr key={r.id}>
+                    <td style={styles.idCell}>{r.id.slice(0, 8)}...</td>
+                    <td>{r.reporter_nickname}</td>
+                    <td>{r.type}</td>
+                    <td>{r.target_id}</td>
+                    <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.description}</td>
+                    <td><span style={{ ...styles.badge, backgroundColor: reportStatusColor(r.status) }}>{reportStatusLabel(r.status)}</span></td>
+                    <td>
+                      <select
+                        value=""
+                        onChange={(e) => { if (e.target.value) handleStatusChange(r.id, e.target.value); }}
+                        style={styles.select}
+                      >
+                        <option value="">处理</option>
+                        <option value="submitted">标记待处理</option>
+                        <option value="reviewing">标记处理中</option>
+                        <option value="resolved">标记已处理</option>
+                      </select>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {tab === 'chats' && data?.chats && (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th>任务 ID</th><th>Poster Cognito Sub</th><th>Helper Cognito Sub</th><th>创建时间</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.chats.map((c: any) => (
+                  <tr key={c.id}>
+                    <td style={styles.idCell}>{c.task_id}</td>
+                    <td style={styles.idCell}>{c.poster_cognito_sub}</td>
+                    <td style={styles.idCell}>{c.helper_cognito_sub}</td>
+                    <td>{new Date(c.created_at).toLocaleString('ja-JP', { hour12: false })}</td>
+                    <td><button onClick={() => loadChatMessages(c)} style={styles.detailBtn}>查看详细</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {tab === 'reviews' && data?.reviews && (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th>任务 ID</th><th>Reviewer Cognito Sub</th><th>Reviewee Cognito Sub</th><th>评分</th><th>创建时间</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.reviews.map((r: any) => (
+                  <tr key={r.id}>
+                    <td style={styles.idCell}>{r.task_id}</td>
+                    <td style={styles.idCell}>{r.reviewer_cognito_sub}</td>
+                    <td style={styles.idCell}>{r.reviewee_cognito_sub}</td>
+                    <td>{'⭐'.repeat(r.rating)}</td>
+                    <td>{new Date(r.created_at).toLocaleString('ja-JP', { hour12: false })}</td>
+                    <td><button onClick={() => setSelectedReview(r)} style={styles.detailBtn}>查看详细</button></td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+
+          {/* Review Detail Modal */}
+          {selectedReview && (
+            <div style={styles.modalOverlay} onClick={() => setSelectedReview(null)}>
+              <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                  <h3 style={{ margin: 0 }}>评价详情</h3>
+                  <button onClick={() => setSelectedReview(null)} style={styles.closeBtn}>✕</button>
+                </div>
+                <div style={styles.modalBody}>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>任务 ID</span><span style={styles.detailValue}>{selectedReview.task_id}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>评价者</span><span style={styles.detailValue}>{selectedReview.reviewer_cognito_sub}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>被评价者</span><span style={styles.detailValue}>{selectedReview.reviewee_cognito_sub}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>评分</span><span style={styles.detailValue}>{'⭐'.repeat(selectedReview.rating)} ({selectedReview.rating}/5)</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>评论内容</span><span style={styles.detailValue}>{selectedReview.comment || '（无评论）'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>创建时间</span><span style={styles.detailValue}>{new Date(selectedReview.created_at).toLocaleString('ja-JP', { hour12: false })}</span></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Pagination */}
+          {data && (
+            <div style={styles.pagination}>
+              <button disabled={page <= 1} onClick={() => setPage(page - 1)} style={styles.pageBtn}>上一页</button>
+              <span>第 {page} / {data.totalPages || 1} 页（共 {data.totalCount || 0} 条）</span>
+              <button disabled={page >= (data.totalPages || 1)} onClick={() => setPage(page + 1)} style={styles.pageBtn}>下一页</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+function statusLabel(s: string) {
+  return { open: '待接单', in_progress: '进行中', completed: '已完成', cancelled: '已取消' }[s] || s;
+}
+function statusColor(s: string) {
+  return { open: '#4caf50', in_progress: '#ff9800', completed: '#2196f3', cancelled: '#9e9e9e' }[s] || '#9e9e9e';
+}
+function reportStatusLabel(s: string) {
+  return { submitted: '待处理', reviewing: '处理中', resolved: '已处理' }[s] || s;
+}
+function reportStatusColor(s: string) {
+  return { submitted: '#ff9800', reviewing: '#2196f3', resolved: '#4caf50' }[s] || '#9e9e9e';
+}
+
+// ─── Main App ────────────────────────────────────────────────────────────────
+
+export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(!!getToken());
+
+  if (!isLoggedIn) {
+    return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
+  }
+  return <Dashboard />;
+}
+
+// ─── Styles ──────────────────────────────────────────────────────────────────
+
+const styles: Record<string, React.CSSProperties> = {
+  loginContainer: { display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '100vh', background: '#f5f5f5' },
+  loginForm: { background: '#fff', padding: 32, borderRadius: 8, boxShadow: '0 2px 8px rgba(0,0,0,0.1)', width: 320 },
+  input: { display: 'block', width: '100%', padding: '10px 12px', marginBottom: 12, border: '1px solid #ddd', borderRadius: 4, fontSize: 14, boxSizing: 'border-box' },
+  button: { display: 'block', width: '100%', padding: '10px 12px', background: '#1976d2', color: '#fff', border: 'none', borderRadius: 4, fontSize: 14, cursor: 'pointer' },
+  error: { color: '#f44336', fontSize: 13, marginBottom: 12 },
+  dashboard: { fontFamily: '-apple-system, BlinkMacSystemFont, sans-serif', minHeight: '100vh', background: '#f5f5f5' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '12px 24px', background: '#1976d2', color: '#fff' },
+  logoutBtn: { background: 'rgba(255,255,255,0.2)', color: '#fff', border: 'none', padding: '6px 12px', borderRadius: 4, cursor: 'pointer' },
+  nav: { display: 'flex', gap: 0, borderBottom: '1px solid #ddd', background: '#fff' },
+  navBtn: { padding: '12px 24px', border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, borderBottom: '2px solid transparent' },
+  navBtnActive: { borderBottom: '2px solid #1976d2', color: '#1976d2', fontWeight: 600 },
+  filters: { padding: '12px 24px', background: '#fff', borderBottom: '1px solid #eee', display: 'flex', gap: 12, alignItems: 'center' },
+  select: { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13 },
+  searchInput: { padding: '6px 10px', border: '1px solid #ddd', borderRadius: 4, fontSize: 13, width: 220 },
+  tableContainer: { padding: 24 },
+  table: { width: '100%', borderCollapse: 'collapse', background: '#fff', borderRadius: 8, overflow: 'hidden', boxShadow: '0 1px 3px rgba(0,0,0,0.08)', fontSize: 13, border: '1px solid #e0e0e0' },
+  idCell: { fontFamily: 'monospace', fontSize: 11, color: '#888', padding: '10px 12px', borderBottom: '1px solid #eee', borderRight: '1px solid #eee' },
+  badge: { display: 'inline-block', padding: '2px 8px', borderRadius: 12, color: '#fff', fontSize: 11, fontWeight: 600 },
+  pagination: { display: 'flex', justifyContent: 'center', alignItems: 'center', gap: 16, padding: '16px 0', fontSize: 13 },
+  pageBtn: { padding: '6px 12px', border: '1px solid #ddd', borderRadius: 4, background: '#fff', cursor: 'pointer' },
+  detailBtn: { padding: '4px 10px', border: '1px solid #1976d2', borderRadius: 4, background: '#fff', color: '#1976d2', cursor: 'pointer', fontSize: 12, whiteSpace: 'nowrap' as any },
+  modalOverlay: { position: 'fixed' as any, top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modalContent: { background: '#fff', borderRadius: 8, width: '90%', maxWidth: 600, maxHeight: '80vh', overflow: 'auto', boxShadow: '0 4px 20px rgba(0,0,0,0.15)' },
+  modalHeader: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px 24px', borderBottom: '1px solid #eee' },
+  closeBtn: { background: 'none', border: 'none', fontSize: 18, cursor: 'pointer', color: '#666' },
+  modalBody: { padding: '16px 24px' },
+  detailRow: { display: 'flex', padding: '10px 0', borderBottom: '1px solid #f5f5f5' },
+  detailLabel: { width: 120, flexShrink: 0, fontWeight: 600, color: '#555', fontSize: 13 },
+  detailValue: { flex: 1, fontSize: 13, wordBreak: 'break-all' as any },
+};
