@@ -67,4 +67,4 @@ jobs:
             rm -rf /home/ubuntu/localtaskapp/admin-dist/*
             cp -r ./admin/dist/* /home/ubuntu/localtaskapp/admin-dist/
             # Restart nginx to pick up new admin files
-            sudo docker compose restart nginx
+            sudo docker restart nginx
