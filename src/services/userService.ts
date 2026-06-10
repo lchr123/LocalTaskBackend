@@ -19,13 +19,13 @@ export async function getProfile(userId: string): Promise<User> {
 }
 
 /**
- * Update the current user's profile (nickname and/or avatarUrl).
- * Validates that at least one field is provided and field lengths are within limits.
+ * Update the current user's profile.
+ * Validates field lengths and updates any provided fields.
  * Throws NotFoundError if the user does not exist.
  */
 export async function updateProfile(
   userId: string,
-  updates: { nickname?: string; avatarUrl?: string }
+  updates: { nickname?: string; avatarUrl?: string; birthday?: string; address?: string; bio?: string }
 ): Promise<User> {
   const fields: Record<string, string> = {};
 
@@ -35,6 +35,14 @@ export async function updateProfile(
 
   if (updates.avatarUrl !== undefined && updates.avatarUrl.length > 500) {
     fields.avatarUrl = '头像URL不能超过500个字符';
+  }
+
+  if (updates.address !== undefined && updates.address.length > 200) {
+    fields.address = '住址不能超过200个字符';
+  }
+
+  if (updates.bio !== undefined && updates.bio.length > 500) {
+    fields.bio = '自我介绍不能超过500个字符';
   }
 
   if (Object.keys(fields).length > 0) {

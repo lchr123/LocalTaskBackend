@@ -100,6 +100,56 @@ app.use('/upload', uploadController);
 // User routes
 app.use('/users', userController);
 
+// My Tags routes (standalone to avoid /users/:id conflict)
+import { authMiddleware } from './middleware/auth';
+import { query as dbQuery } from './config/database';
+import { AuthenticatedRequest } from './types/common';
+
+app.get('/my-tags', authMiddleware as any, async (req: any, res: any, next: any) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.userId;
+    const result = await dbQuery(
+      `SELECT ht.id, ht.name, ht.label_zh, ht.category
+       FROM user_helper_tags uht
+       JOIN helper_tags ht ON uht.tag_id = ht.id
+       WHERE uht.user_id = $1`,
+      [userId]
+    );
+    res.status(200).json({ tags: result.rows });
+  } catch (err) { next(err); }
+});
+
+app.put('/my-tags', authMiddleware as any, async (req: any, res: any, next: any) => {
+  try {
+    const userId = (req as AuthenticatedRequest).user!.userId;
+    const { tagIds } = req.body;
+
+    if (!Array.isArray(tagIds)) {
+      res.status(422).json({ error: 'validation_error', message: 'tagIds must be an array' });
+      return;
+    }
+
+    await dbQuery('DELETE FROM user_helper_tags WHERE user_id = $1', [userId]);
+
+    if (tagIds.length > 0) {
+      const values = tagIds.map((_: string, i: number) => `($1, $${i + 2})`).join(', ');
+      await dbQuery(
+        `INSERT INTO user_helper_tags (user_id, tag_id) VALUES ${values} ON CONFLICT DO NOTHING`,
+        [userId, ...tagIds]
+      );
+    }
+
+    const result = await dbQuery(
+      `SELECT ht.id, ht.name, ht.label_zh, ht.category
+       FROM user_helper_tags uht
+       JOIN helper_tags ht ON uht.tag_id = ht.id
+       WHERE uht.user_id = $1`,
+      [userId]
+    );
+    res.status(200).json({ tags: result.rows });
+  } catch (err) { next(err); }
+});
+
 // Admin routes
 app.use('/admin', adminController);
 

@@ -6,10 +6,25 @@ import { AuthenticatedRequest } from '../types/common';
 const router = Router();
 
 /**
+ * GET /users/helper-tags
+ * Returns all available helper tags.
+ */
+router.get(
+  '/helper-tags',
+  async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const { query: dbQuery } = await import('../config/database');
+      const result = await dbQuery('SELECT id, name, label_zh, category FROM helper_tags ORDER BY category, name');
+      res.status(200).json({ tags: result.rows });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * GET /users/me
  * Returns the current authenticated user's profile.
- *
- * Validates: Requirements 1.5
  */
 router.get(
   '/me',
@@ -26,8 +41,36 @@ router.get(
 );
 
 /**
+ * PATCH /users/me
+ * Update the current authenticated user's profile.
+ */
+router.patch(
+  '/me',
+  authMiddleware as any,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const { nickname, avatarUrl, birthday, address, bio } = req.body;
+
+      const user = await userService.updateProfile(authReq.user!.userId, {
+        nickname,
+        avatarUrl,
+        birthday,
+        address,
+        bio,
+      });
+
+      res.status(200).json(user);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * GET /users/:id
  * Returns a user's public profile by ID.
+ * MUST be registered AFTER all /users/xxx specific routes to avoid matching.
  */
 router.get(
   '/:id',
@@ -42,25 +85,22 @@ router.get(
 );
 
 /**
- * PATCH /users/me
- * Update the current authenticated user's nickname and/or avatarUrl.
- *
- * Validates: Requirements 1.6
+ * GET /users/:id/tags
+ * Returns a user's helper tags (public).
  */
-router.patch(
-  '/me',
-  authMiddleware as any,
+router.get(
+  '/:id/tags',
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
-      const authReq = req as AuthenticatedRequest;
-      const { nickname, avatarUrl } = req.body;
-
-      const user = await userService.updateProfile(authReq.user!.userId, {
-        nickname,
-        avatarUrl,
-      });
-
-      res.status(200).json(user);
+      const { query: dbQuery } = await import('../config/database');
+      const result = await dbQuery(
+        `SELECT ht.id, ht.name, ht.label_zh, ht.category
+         FROM user_helper_tags uht
+         JOIN helper_tags ht ON uht.tag_id = ht.id
+         WHERE uht.user_id = $1`,
+        [req.params.id]
+      );
+      res.status(200).json({ tags: result.rows });
     } catch (err) {
       next(err);
     }

@@ -7,6 +7,9 @@ export interface User {
   avatarUrl?: string;
   averageRating: number;
   completedTaskCount: number;
+  birthday?: string | null;
+  address?: string | null;
+  bio?: string | null;
   createdAt: string;
   updatedAt: string;
 }
