@@ -74,6 +74,7 @@ jobs:
           username: ubuntu
           key: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
           script: |
+            cd /home/ubuntu/localtaskbackend
             # Append Admin env
             echo "" >> .env
             echo "ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}" >> .env
