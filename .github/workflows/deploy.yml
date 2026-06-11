@@ -54,6 +54,9 @@ jobs:
           script: |
             cd /home/ubuntu/localtaskbackend
             echo "${{ secrets.PROD_ENV_FILE }}" > .env
+            echo "" >> .env
+            echo "ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}" >> .env
+            echo "ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}" >> .env
             sudo docker compose down --rmi all --remove-orphans
             sudo docker compose up -d --build
             sudo docker image prune -f
@@ -75,10 +78,6 @@ jobs:
           key: ${{ secrets.LIGHTSAIL_SSH_PRIVATE_KEY }}
           script: |
             cd /home/ubuntu/localtaskbackend
-            # Append Admin env
-            echo "" >> .env
-            echo "ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}" >> .env
-            echo "ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}" >> .env
             # Copy admin panel to frontend nginx directory
             mkdir -p /home/ubuntu/localtaskapp/admin-dist
             rm -rf /home/ubuntu/localtaskapp/admin-dist/*
