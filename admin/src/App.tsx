@@ -115,7 +115,7 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
 function Dashboard() {
-  const [tab, setTab] = useState<'users' | 'tasks' | 'reports' | 'chats' | 'reviews'>('users');
+  const [tab, setTab] = useState<'users' | 'tasks' | 'reports' | 'chats' | 'reviews' | 'bans'>('users');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -126,6 +126,9 @@ function Dashboard() {
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [selectedReview, setSelectedReview] = useState<any>(null);
+  const [banDialogUser, setBanDialogUser] = useState<any>(null);
+  const [banReason, setBanReason] = useState('');
+  const [banDuration, setBanDuration] = useState('permanent');
 
   useEffect(() => {
     loadData();
@@ -135,7 +138,13 @@ function Dashboard() {
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: '20' });
-      if (statusFilter) params.set('status', statusFilter);
+      if (statusFilter) {
+        if (tab === 'bans') {
+          params.set('active', statusFilter);
+        } else {
+          params.set('status', statusFilter);
+        }
+      }
       if ((tab === 'tasks' || tab === 'users' || tab === 'chats') && searchQuery) params.set('search', searchQuery);
       const result = await apiRequest(`/${tab}?${params}`);
       setData(result);
@@ -156,6 +165,30 @@ function Dashboard() {
       setChatMessages([]);
     } finally {
       setLoadingMessages(false);
+    }
+  };
+
+  const handleBanSubmit = async () => {
+    if (!banDialogUser || !banReason.trim()) return;
+    try {
+      let expiresAt: string | null = null;
+      if (banDuration !== 'permanent') {
+        const days = parseInt(banDuration);
+        const date = new Date();
+        date.setDate(date.getDate() + days);
+        expiresAt = date.toISOString();
+      }
+      await apiRequest(`/users/${banDialogUser.id}/ban`, {
+        method: 'POST',
+        body: JSON.stringify({ reason: banReason.trim(), expiresAt }),
+      });
+      setBanDialogUser(null);
+      setBanReason('');
+      setBanDuration('permanent');
+      alert('封禁成功');
+      loadData();
+    } catch {
+      alert('封禁失败');
     }
   };
 
@@ -192,13 +225,13 @@ function Dashboard() {
       </header>
 
       <nav style={styles.nav}>
-        {(['users', 'tasks', 'reports', 'chats', 'reviews'] as const).map((t) => (
+        {(['users', 'tasks', 'reports', 'chats', 'reviews', 'bans'] as const).map((t) => (
           <button
             key={t}
             onClick={() => { setTab(t); setPage(1); setStatusFilter(''); setSearchQuery(''); }}
             style={{ ...styles.navBtn, ...(tab === t ? styles.navBtnActive : {}) }}
           >
-            {{ users: '👤 用户', tasks: '📋 任务', reports: '🚨 投诉', chats: '💬 对话', reviews: '⭐ 评价' }[t]}
+            {{ users: '👤 用户', tasks: '📋 任务', reports: '🚨 投诉', chats: '💬 对话', reviews: '⭐ 评价', bans: '🚫 封禁' }[t]}
           </button>
         ))}
       </nav>
@@ -257,6 +290,16 @@ function Dashboard() {
         </div>
       )}
 
+      {tab === 'bans' && (
+        <div style={styles.filters}>
+          <select value={statusFilter} onChange={(e) => { setStatusFilter(e.target.value); setPage(1); }} style={styles.select}>
+            <option value="">全部</option>
+            <option value="true">生效中</option>
+            <option value="false">已解除</option>
+          </select>
+        </div>
+      )}
+
       {loading ? (
         <p style={{ textAlign: 'center', padding: 40 }}>加载中...</p>
       ) : (
@@ -265,7 +308,7 @@ function Dashboard() {
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th>Cognito Sub</th><th>昵称</th><th>邮箱</th><th>手机</th><th>评分</th><th>完成任务</th><th>注册时间</th>
+                  <th>Cognito Sub</th><th>昵称</th><th>邮箱</th><th>手机</th><th>评分</th><th>完成任务</th><th>注册时间</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -278,6 +321,7 @@ function Dashboard() {
                     <td>{u.average_rating}</td>
                     <td>{u.completed_task_count}</td>
                     <td>{new Date(u.created_at).toLocaleString('ja-JP', { hour12: false })}</td>
+                    <td><button onClick={() => setBanDialogUser(u)} style={{ ...styles.detailBtn, borderColor: '#f44336', color: '#f44336' }}>封禁</button></td>
                   </tr>
                 ))}
               </tbody>
@@ -476,6 +520,88 @@ function Dashboard() {
                 </div>
               </div>
             </div>
+          )}
+
+          {/* Ban Dialog */}
+          {banDialogUser && (
+            <div style={styles.modalOverlay} onClick={() => setBanDialogUser(null)}>
+              <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                  <h3 style={{ margin: 0 }}>封禁用户</h3>
+                  <button onClick={() => setBanDialogUser(null)} style={styles.closeBtn}>✕</button>
+                </div>
+                <div style={styles.modalBody}>
+                  <div style={styles.detailRow}>
+                    <span style={styles.detailLabel}>用户</span>
+                    <span style={styles.detailValue}>{banDialogUser.nickname || '-'} ({banDialogUser.cognito_sub})</span>
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>封禁原因 *</label>
+                    <textarea
+                      value={banReason}
+                      onChange={(e) => setBanReason(e.target.value)}
+                      placeholder="请填写封禁原因..."
+                      style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #ddd', fontSize: 13, minHeight: 80, resize: 'vertical', boxSizing: 'border-box' as any }}
+                    />
+                  </div>
+                  <div style={{ marginBottom: 16 }}>
+                    <label style={{ fontSize: 13, fontWeight: 600, color: '#555', display: 'block', marginBottom: 4 }}>封禁时长</label>
+                    <select value={banDuration} onChange={(e) => setBanDuration(e.target.value)} style={{ ...styles.select, width: '100%', padding: 10 }}>
+                      <option value="permanent">永久封禁</option>
+                      <option value="1">1 天</option>
+                      <option value="3">3 天</option>
+                      <option value="7">7 天</option>
+                      <option value="14">14 天</option>
+                      <option value="30">30 天</option>
+                      <option value="90">90 天</option>
+                    </select>
+                  </div>
+                  <button
+                    onClick={handleBanSubmit}
+                    disabled={!banReason.trim()}
+                    style={{ width: '100%', padding: 10, background: !banReason.trim() ? '#ccc' : '#f44336', color: '#fff', border: 'none', borderRadius: 6, fontSize: 14, cursor: banReason.trim() ? 'pointer' : 'not-allowed' }}
+                  >
+                    确认封禁
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {tab === 'bans' && data?.bans && (
+            <table style={styles.table}>
+              <thead>
+                <tr>
+                  <th>用户昵称</th><th>Cognito Sub</th><th>原因</th><th>封禁时间</th><th>到期时间</th><th>状态</th><th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.bans.map((b: any) => (
+                  <tr key={b.id}>
+                    <td>{b.nickname || '-'}</td>
+                    <td style={styles.idCell}>{b.cognito_sub}</td>
+                    <td>{b.reason}</td>
+                    <td>{new Date(b.banned_at).toLocaleString('ja-JP', { hour12: false })}</td>
+                    <td>{b.expires_at ? new Date(b.expires_at).toLocaleString('ja-JP', { hour12: false }) : '永久'}</td>
+                    <td><span style={{ ...styles.badge, backgroundColor: b.is_active ? '#f44336' : '#4caf50' }}>{b.is_active ? '生效中' : '已解除'}</span></td>
+                    <td>
+                      {b.is_active && (
+                        <button
+                          onClick={async () => {
+                            if (!confirm('确定解封该用户？')) return;
+                            await apiRequest(`/users/${b.user_id}/unban`, { method: 'POST' });
+                            loadData();
+                          }}
+                          style={styles.detailBtn}
+                        >
+                          解封
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           )}
 
           {/* Pagination */}

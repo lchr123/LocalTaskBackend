@@ -186,6 +186,24 @@ export async function authMiddleware(
     // Find or create user in database
     const userId = await findOrCreateUser(sub, email, phone);
 
+    // Check if user is banned
+    const banResult = await query<{ reason: string; expires_at: string | null }>(
+      `SELECT reason, expires_at FROM user_bans
+       WHERE user_id = $1 AND is_active = true
+         AND (expires_at IS NULL OR expires_at > NOW())
+       LIMIT 1`,
+      [userId]
+    );
+
+    if (banResult.rows.length > 0) {
+      const ban = banResult.rows[0];
+      const message = ban.expires_at
+        ? `账号已被暂停至 ${new Date(ban.expires_at).toLocaleDateString()}，原因：${ban.reason}`
+        : `账号已被永久封禁，原因：${ban.reason}`;
+      res.status(403).json({ error: 'account_banned', message });
+      return;
+    }
+
     // Inject user info into request context
     req.user = {
       sub,

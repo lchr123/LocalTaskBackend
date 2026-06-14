@@ -415,4 +415,121 @@ router.get('/chats/:id/messages', async (req: Request, res: Response, next: Next
   }
 });
 
+/**
+ * POST /admin/users/:id/ban
+ * Ban a user. Body: { reason, expiresAt? (ISO string, null for permanent) }
+ */
+router.post('/users/:id/ban', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { reason, expiresAt } = req.body;
+
+    if (!reason) {
+      res.status(422).json({ error: 'validation_error', message: '请提供封禁原因' });
+      return;
+    }
+
+    const result = await query(
+      `INSERT INTO user_bans (user_id, reason, banned_by, expires_at)
+       VALUES ($1, $2, 'admin', $3)
+       RETURNING *`,
+      [id, reason, expiresAt || null]
+    );
+
+    res.status(201).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /admin/users/:id/unban
+ * Unban a user (deactivate all active bans).
+ */
+router.post('/users/:id/unban', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    await query(
+      `UPDATE user_bans SET is_active = false, unbanned_at = NOW()
+       WHERE user_id = $1 AND is_active = true`,
+      [id]
+    );
+
+    res.status(200).json({ message: '已解封' });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /admin/users/:id/bans
+ * Get ban history for a user.
+ */
+router.get('/users/:id/bans', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+
+    const result = await query(
+      `SELECT * FROM user_bans WHERE user_id = $1 ORDER BY banned_at DESC`,
+      [id]
+    );
+
+    res.status(200).json({ bans: result.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * GET /admin/bans
+ * List all bans with user info, supports filtering by is_active.
+ */
+router.get('/bans', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const pageSize = parseInt(req.query.pageSize as string) || 20;
+    const activeFilter = req.query.active as string | undefined;
+    const offset = (page - 1) * pageSize;
+
+    const listParams: any[] = [pageSize, offset];
+    const countParams: any[] = [];
+    let whereStr = '';
+    let countWhereStr = '';
+
+    if (activeFilter === 'true' || activeFilter === 'false') {
+      const isActive = activeFilter === 'true';
+      whereStr = `WHERE b.is_active = $3`;
+      countWhereStr = `WHERE b.is_active = $1`;
+      listParams.push(isActive);
+      countParams.push(isActive);
+    }
+
+    const [bansResult, countResult] = await Promise.all([
+      query(
+        `SELECT b.*, u.nickname, u.cognito_sub
+         FROM user_bans b
+         JOIN users u ON b.user_id = u.id
+         ${whereStr}
+         ORDER BY b.banned_at DESC
+         LIMIT $1 OFFSET $2`,
+        listParams
+      ),
+      query(
+        `SELECT COUNT(*) AS count FROM user_bans b ${countWhereStr}`,
+        countParams
+      ),
+    ]);
+
+    res.status(200).json({
+      bans: bansResult.rows,
+      page,
+      totalCount: parseInt(countResult.rows[0].count),
+      totalPages: Math.ceil(parseInt(countResult.rows[0].count) / pageSize),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
 export { router as adminController };
