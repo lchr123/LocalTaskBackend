@@ -10,6 +10,7 @@ export interface User {
   birthday?: string | null;
   address?: string | null;
   bio?: string | null;
+  gender?: string | null;
   createdAt: string;
   updatedAt: string;
 }

@@ -13,6 +13,7 @@ interface UserRow {
   birthday: string | null;
   address: string | null;
   bio: string | null;
+  gender: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -30,6 +31,7 @@ function mapRowToUser(row: UserRow): User {
     birthday: row.birthday || null,
     address: row.address || null,
     bio: row.bio || null,
+    gender: row.gender || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -41,7 +43,7 @@ function mapRowToUser(row: UserRow): User {
 export async function findByCognitoSub(sub: string): Promise<User | null> {
   const sql = `
     SELECT u.id, u.cognito_sub, u.email, u.phone, u.nickname, u.avatar_url,
-           u.average_rating, u.birthday, u.address, u.bio, u.created_at, u.updated_at,
+           u.average_rating, u.birthday, u.address, u.bio, u.gender, u.created_at, u.updated_at,
            (SELECT COUNT(*) FROM tasks t WHERE t.selected_helper_id = u.id AND t.status = 'completed')::int AS completed_task_count
     FROM users u
     WHERE u.cognito_sub = $1
@@ -63,7 +65,7 @@ export async function findByCognitoSub(sub: string): Promise<User | null> {
 export async function findById(userId: string): Promise<User | null> {
   const sql = `
     SELECT u.id, u.cognito_sub, u.email, u.phone, u.nickname, u.avatar_url,
-           u.average_rating, u.birthday, u.address, u.bio, u.created_at, u.updated_at,
+           u.average_rating, u.birthday, u.address, u.bio, u.gender, u.created_at, u.updated_at,
            (SELECT COUNT(*) FROM tasks t WHERE t.selected_helper_id = u.id AND t.status = 'completed')::int AS completed_task_count
     FROM users u
     WHERE u.id = $1
@@ -121,7 +123,7 @@ export async function create(
  */
 export async function updateProfile(
   userId: string,
-  updates: { nickname?: string; avatarUrl?: string; birthday?: string; address?: string; bio?: string }
+  updates: { nickname?: string; avatarUrl?: string; birthday?: string; gender?: string; address?: string; bio?: string }
 ): Promise<User | null> {
   const setClauses: string[] = [];
   const values: unknown[] = [];
@@ -157,6 +159,12 @@ export async function updateProfile(
     paramIndex++;
   }
 
+  if (updates.gender !== undefined) {
+    setClauses.push(`gender = $${paramIndex}`);
+    values.push(updates.gender);
+    paramIndex++;
+  }
+
   if (setClauses.length === 0) {
     // Nothing to update, just return the current user
     return findById(userId);
@@ -169,7 +177,7 @@ export async function updateProfile(
     SET ${setClauses.join(', ')}
     WHERE id = $${paramIndex}
     RETURNING id, cognito_sub, email, phone, nickname, avatar_url,
-              average_rating, completed_task_count, birthday, address, bio, created_at, updated_at
+              average_rating, completed_task_count, birthday, address, bio, gender, created_at, updated_at
   `;
 
   values.push(userId);

@@ -28,6 +28,32 @@ router.get(
 );
 
 /**
+ * GET /chat/has-unread
+ * Check if the current user has any unread messages.
+ * Returns { hasUnread: boolean }
+ */
+router.get(
+  '/has-unread',
+  authMiddleware as any,
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const userId = req.user!.userId;
+      const { query: dbQuery } = await import('../config/database');
+      const result = await dbQuery(
+        `SELECT 1 FROM chat_sessions
+         WHERE (poster_id = $1 AND poster_unread > 0)
+            OR (helper_id = $1 AND helper_unread > 0)
+         LIMIT 1`,
+        [userId]
+      );
+      res.status(200).json({ hasUnread: result.rows.length > 0 });
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
  * GET /chat/sessions/:id/messages
  * List messages for a chat session with pagination.
  * Validates that the user is a participant. Also marks messages as read.

@@ -57,6 +57,8 @@ jobs:
             echo "" >> .env
             echo "ADMIN_USERNAME=${{ secrets.ADMIN_USERNAME }}" >> .env
             echo "ADMIN_PASSWORD=${{ secrets.ADMIN_PASSWORD }}" >> .env
+            echo "AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}" >> .env
+            echo "AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}" >> .env
             sudo docker compose down --rmi all --remove-orphans
             sudo docker compose up -d --build
             sudo docker image prune -f

@@ -25,7 +25,7 @@ export async function getProfile(userId: string): Promise<User> {
  */
 export async function updateProfile(
   userId: string,
-  updates: { nickname?: string; avatarUrl?: string; birthday?: string; address?: string; bio?: string }
+  updates: { nickname?: string; avatarUrl?: string; birthday?: string; gender?: string; address?: string; bio?: string }
 ): Promise<User> {
   const fields: Record<string, string> = {};
 

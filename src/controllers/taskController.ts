@@ -60,6 +60,31 @@ router.get('/mine', authMiddleware as any, async (req: Request, res: Response, n
 });
 
 /**
+ * GET /tasks/mine/has-pending-intents
+ * Check if the current user has any pending intents on their posted tasks.
+ * Returns { hasPending: boolean }
+ */
+router.get('/mine/has-pending-intents', authMiddleware as any, async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.user!.userId;
+
+    const { query: dbQuery } = await import('../config/database');
+    const result = await dbQuery(
+      `SELECT COUNT(DISTINCT i.id)::int AS count FROM intents i
+       JOIN tasks t ON i.task_id = t.id
+       WHERE t.poster_id = $1 AND i.status = 'pending'`,
+      [userId]
+    );
+
+    const count = result.rows[0]?.count || 0;
+    res.status(200).json({ hasPending: count > 0, pendingCount: count });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /tasks/accepted
  * List tasks accepted by the current user (where user is the selected helper).
  * Returns all tasks regardless of status, ordered by creation time (newest first).

@@ -50,12 +50,13 @@ router.patch(
   async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     try {
       const authReq = req as AuthenticatedRequest;
-      const { nickname, avatarUrl, birthday, address, bio } = req.body;
+      const { nickname, avatarUrl, birthday, address, bio, gender } = req.body;
 
       const user = await userService.updateProfile(authReq.user!.userId, {
         nickname,
         avatarUrl,
         birthday,
+        gender,
         address,
         bio,
       });
