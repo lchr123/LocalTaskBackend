@@ -22,6 +22,18 @@ export const config = {
     bucket: process.env.AWS_S3_BUCKET || '',
     region: process.env.AWS_S3_REGION || 'ap-northeast-1',
   },
+  resend: {
+    apiKey: process.env.RESEND_API_KEY || '',
+    fromEmail: process.env.FROM_EMAIL || 'no-reply@locallyhelper.com',
+  },
+  digest: {
+    secret: process.env.DIGEST_SECRET || '',
+    unsubscribeSecret: process.env.UNSUBSCRIBE_SECRET || '',
+    /** App site root, e.g. https://locallyhelper.com — used for the "view in app" button */
+    appUrl: (process.env.APP_PUBLIC_URL || '').replace(/\/$/, ''),
+    /** Backend API base, e.g. https://locallyhelper.com/api — used for the unsubscribe link */
+    apiUrl: (process.env.API_PUBLIC_URL || '').replace(/\/$/, ''),
+  },
   rateLimit: {
     auth: parseInt(process.env.RATE_LIMIT_AUTH || '10', 10),
     api: parseInt(process.env.RATE_LIMIT_API || '60', 10),

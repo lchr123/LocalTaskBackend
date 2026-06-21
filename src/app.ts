@@ -9,6 +9,7 @@ import { healthController } from './controllers/healthController';
 import { taskController } from './controllers/taskController';
 import { intentController, selectHelperRouter, chatWithApplicantRouter } from './controllers/intentController';
 import { chatController } from './controllers/chatController';
+import { digestController } from './controllers/digestController';
 import { reviewController, getUserReviews, getUserReviewsGiven } from './controllers/reviewController';
 import { reportController } from './controllers/reportController';
 import { uploadController } from './controllers/uploadController';
@@ -84,6 +85,9 @@ app.use('/tasks/:id/chat', chatWithApplicantRouter);
 
 // Chat routes
 app.use('/chat', chatController);
+
+// Weekly digest + unsubscribe (POST /digest/run, GET /unsubscribe)
+app.use('/', digestController);
 
 // Review routes
 app.use('/reviews', reviewController);

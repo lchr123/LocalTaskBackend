@@ -1,0 +1,33 @@
+name: Weekly Digest
+
+on:
+  schedule:
+    # 03:00 UTC every Friday = 12:00 JST Friday
+    - cron: '0 3 * * 5'
+  workflow_dispatch:
+    inputs:
+      dryRun:
+        description: 'Dry run (no emails sent), 1 or empty'
+        required: false
+        default: ''
+      testEmail:
+        description: 'Send only to this email (testing)'
+        required: false
+        default: ''
+
+jobs:
+  trigger-digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger weekly digest
+        run: |
+          URL="${{ secrets.API_PUBLIC_URL }}/digest/run"
+          QS=""
+          if [ -n "${{ github.event.inputs.dryRun }}" ]; then QS="?dryRun=${{ github.event.inputs.dryRun }}"; fi
+          if [ -n "${{ github.event.inputs.testEmail }}" ]; then
+            if [ -z "$QS" ]; then QS="?testEmail=${{ github.event.inputs.testEmail }}"; else QS="$QS&testEmail=${{ github.event.inputs.testEmail }}"; fi
+          fi
+          echo "POST $URL$QS"
+          curl -fsS -X POST "$URL$QS" \
+            -H "x-digest-secret: ${{ secrets.DIGEST_SECRET }}" \
+            -w "\nHTTP %{http_code}\n"
