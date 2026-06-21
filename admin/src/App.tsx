@@ -126,6 +126,7 @@ function Dashboard() {
   const [chatMessages, setChatMessages] = useState<any[]>([]);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [selectedReview, setSelectedReview] = useState<any>(null);
+  const [selectedUser, setSelectedUser] = useState<any>(null);
   const [banDialogUser, setBanDialogUser] = useState<any>(null);
   const [banReason, setBanReason] = useState('');
   const [banDuration, setBanDuration] = useState('permanent');
@@ -308,7 +309,7 @@ function Dashboard() {
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th>Cognito Sub</th><th>昵称</th><th>邮箱</th><th>手机</th><th>评分</th><th>完成任务</th><th>注册时间</th><th>操作</th>
+                  <th>Cognito Sub</th><th>昵称</th><th>邮箱</th><th>手机</th><th>注册时间</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -318,10 +319,11 @@ function Dashboard() {
                     <td>{u.nickname || '-'}</td>
                     <td>{u.email || '-'}</td>
                     <td>{u.phone || '-'}</td>
-                    <td>{u.average_rating}</td>
-                    <td>{u.completed_task_count}</td>
                     <td>{new Date(u.created_at).toLocaleString('ja-JP', { hour12: false })}</td>
-                    <td><button onClick={() => setBanDialogUser(u)} style={{ ...styles.detailBtn, borderColor: '#f44336', color: '#f44336' }}>封禁</button></td>
+                    <td style={{ display: 'flex', gap: 6 }}>
+                      <button onClick={() => setSelectedUser(u)} style={styles.detailBtn}>查看详细</button>
+                      <button onClick={() => setBanDialogUser(u)} style={{ ...styles.detailBtn, borderColor: '#f44336', color: '#f44336' }}>封禁</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -379,10 +381,34 @@ function Dashboard() {
                   <div style={styles.detailRow}><span style={styles.detailLabel}>状态</span><span style={styles.detailValue}><span style={{ ...styles.badge, backgroundColor: statusColor(selectedTask.status) }}>{statusLabel(selectedTask.status)}</span></span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>描述</span><span style={styles.detailValue}>{selectedTask.description}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>地址</span><span style={styles.detailValue}>{selectedTask.location_address || '-'}</span></div>
-                  <div style={styles.detailRow}><span style={styles.detailLabel}>报酬</span><span style={styles.detailValue}>¥{selectedTask.reward}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>报酬</span><span style={styles.detailValue}>¥{selectedTask.reward}{selectedTask.reward_unit ? ` / ${({ once: '次', hour: '小时', day: '日', month: '月' } as any)[selectedTask.reward_unit] || selectedTask.reward_unit}` : ''}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>截止时间</span><span style={styles.detailValue}>{selectedTask.deadline ? new Date(selectedTask.deadline).toLocaleString('ja-JP', { hour12: false }) : '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>预计开始</span><span style={styles.detailValue}>{selectedTask.start_time ? new Date(selectedTask.start_time).toLocaleString('ja-JP', { hour12: false }) : '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>预计时长</span><span style={styles.detailValue}>{selectedTask.duration_hours != null ? `${selectedTask.duration_hours} 小时${selectedTask.duration_unit ? ` / ${({ once: '次', day: '日', week: '周', month: '月' } as any)[selectedTask.duration_unit] || selectedTask.duration_unit}` : ''}` : '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>招募人数</span><span style={styles.detailValue}>{selectedTask.headcount ?? 1} 人</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>联系方式</span><span style={styles.detailValue}>{selectedTask.contact_method || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>坐标</span><span style={styles.detailValue}>{selectedTask.latitude != null && selectedTask.longitude != null ? `${Number(selectedTask.latitude).toFixed(5)}, ${Number(selectedTask.longitude).toFixed(5)}` : '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>发布者备注</span><span style={styles.detailValue}>{selectedTask.poster_memo || '-'}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>意向人数</span><span style={styles.detailValue}>{selectedTask.intent_count}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>选中帮手 ID</span><span style={styles.detailValue}>{selectedTask.selected_helper_id || '-'}</span></div>
+                  <div style={styles.detailRow}>
+                    <span style={styles.detailLabel}>任务图片</span>
+                    <span style={styles.detailValue}>
+                      {Array.isArray(selectedTask.images) && selectedTask.images.length > 0 ? (
+                        <span style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                          {selectedTask.images.map((url: string, i: number) => (
+                            <img
+                              key={i}
+                              src={url}
+                              alt={`task-img-${i}`}
+                              onClick={() => window.open(url, '_blank')}
+                              style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, cursor: 'pointer', border: '1px solid #ddd' }}
+                            />
+                          ))}
+                        </span>
+                      ) : '-'}
+                    </span>
+                  </div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>创建时间</span><span style={styles.detailValue}>{new Date(selectedTask.created_at).toLocaleString('ja-JP', { hour12: false })}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>更新时间</span><span style={styles.detailValue}>{selectedTask.updated_at ? new Date(selectedTask.updated_at).toLocaleString('ja-JP', { hour12: false }) : '-'}</span></div>
                 </div>
@@ -517,6 +543,38 @@ function Dashboard() {
                   <div style={styles.detailRow}><span style={styles.detailLabel}>评分</span><span style={styles.detailValue}>{'⭐'.repeat(selectedReview.rating)} ({selectedReview.rating}/5)</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>评论内容</span><span style={styles.detailValue}>{selectedReview.comment || '（无评论）'}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>创建时间</span><span style={styles.detailValue}>{new Date(selectedReview.created_at).toLocaleString('ja-JP', { hour12: false })}</span></div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* User Detail Modal */}
+          {selectedUser && (
+            <div style={styles.modalOverlay} onClick={() => setSelectedUser(null)}>
+              <div style={styles.modalContent} onClick={(e) => e.stopPropagation()}>
+                <div style={styles.modalHeader}>
+                  <h3 style={{ margin: 0 }}>用户详情</h3>
+                  <button onClick={() => setSelectedUser(null)} style={styles.closeBtn}>✕</button>
+                </div>
+                <div style={styles.modalBody}>
+                  {selectedUser.avatar_url && (
+                    <div style={{ textAlign: 'center', marginBottom: 12 }}>
+                      <img src={selectedUser.avatar_url} alt="avatar" style={{ width: 72, height: 72, borderRadius: '50%', objectFit: 'cover', border: '1px solid #ddd' }} />
+                    </div>
+                  )}
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>昵称</span><span style={styles.detailValue}>{selectedUser.nickname || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>用户 ID</span><span style={styles.detailValue}>{selectedUser.id}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>Cognito Sub</span><span style={styles.detailValue}>{selectedUser.cognito_sub || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>邮箱</span><span style={styles.detailValue}>{selectedUser.email || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>手机</span><span style={styles.detailValue}>{selectedUser.phone || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>性别</span><span style={styles.detailValue}>{({ male: '男', female: '女', other: '其他' } as any)[selectedUser.gender] || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>生日</span><span style={styles.detailValue}>{selectedUser.birthday ? new Date(selectedUser.birthday).toLocaleDateString('ja-JP') : '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>住址</span><span style={styles.detailValue}>{selectedUser.address || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>自我介绍</span><span style={styles.detailValue}>{selectedUser.bio || '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>评分</span><span style={styles.detailValue}>⭐ {selectedUser.average_rating ?? '-'}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>完成任务</span><span style={styles.detailValue}>{selectedUser.completed_task_count ?? 0} 个</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>注册时间</span><span style={styles.detailValue}>{new Date(selectedUser.created_at).toLocaleString('ja-JP', { hour12: false })}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>更新时间</span><span style={styles.detailValue}>{selectedUser.updated_at ? new Date(selectedUser.updated_at).toLocaleString('ja-JP', { hour12: false }) : '-'}</span></div>
                 </div>
               </div>
             </div>

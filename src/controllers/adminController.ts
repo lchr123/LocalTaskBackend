@@ -17,6 +17,7 @@ import { query } from '../config/database';
 import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config';
+import { getPresignedUrl } from '../services/uploadService';
 
 const router = Router();
 
@@ -76,7 +77,8 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction): Pr
 
     const [usersResult, countResult] = await Promise.all([
       query(
-        `SELECT id, cognito_sub, email, phone, nickname, avatar_url, average_rating, 
+        `SELECT id, cognito_sub, email, phone, nickname, avatar_url, average_rating,
+                birthday, gender, address, bio,
                 (SELECT COUNT(*) FROM tasks t WHERE t.selected_helper_id = u.id AND t.status = 'completed')::int AS completed_task_count,
                 created_at, updated_at
          FROM users u ${whereStr} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
@@ -142,8 +144,13 @@ router.get('/tasks', async (req: Request, res: Response, next: NextFunction): Pr
     const [tasksResult, countResult] = await Promise.all([
       query(
         `SELECT t.id, t.poster_id, u.nickname AS poster_nickname, u.email AS poster_email,
-                t.type, t.description, t.location_address, t.reward, t.deadline,
+                t.type, t.description, t.location_address,
+                ST_Y(t.location::geometry) AS latitude,
+                ST_X(t.location::geometry) AS longitude,
+                t.reward, t.reward_unit, t.deadline,
                 t.status, t.intent_count, t.selected_helper_id,
+                t.images, t.headcount, t.start_time, t.contact_method,
+                t.duration_hours, t.duration_unit, t.poster_memo,
                 t.created_at, t.updated_at
          FROM tasks t
          JOIN users u ON t.poster_id = u.id
@@ -157,8 +164,18 @@ router.get('/tasks', async (req: Request, res: Response, next: NextFunction): Pr
       ),
     ]);
 
+    // Presign task images so the admin panel can display private objects
+    const tasks = await Promise.all(
+      tasksResult.rows.map(async (t: any) => ({
+        ...t,
+        images: Array.isArray(t.images) && t.images.length > 0
+          ? await Promise.all(t.images.map((url: string) => getPresignedUrl(url)))
+          : [],
+      }))
+    );
+
     res.status(200).json({
-      tasks: tasksResult.rows,
+      tasks,
       page,
       totalCount: parseInt(countResult.rows[0].count),
       totalPages: Math.ceil(parseInt(countResult.rows[0].count) / pageSize),
