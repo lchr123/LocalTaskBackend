@@ -39,8 +39,8 @@ export const createTaskSchema = z.object({
   reward: z
     .number({ error: '報酬は数値である必要があります' })
     .int('報酬は整数である必要があります')
-    .min(1000, '報酬は1000以上である必要があります')
-    .max(99999, '報酬は99999以下である必要があります'),
+    .min(0, '報酬は0以上である必要があります')
+    .max(100000000, '報酬は100000000以下である必要があります'),
 
   deadline: z
     .string({ error: '締切はISO 8601形式の日時文字列である必要があります' })
@@ -58,6 +58,26 @@ export const createTaskSchema = z.object({
       },
       { message: '締切は現在時刻より後である必要があります' }
     ),
+
+  // --- New optional fields (migration 012) ---
+  rewardUnit: z.enum(['once', 'hour', 'day', 'month']).nullish(),
+
+  images: z.array(z.string()).max(9, '最多上传9张图片').optional(),
+
+  headcount: z.coerce.number().int().min(1).max(999).optional(),
+
+  startTime: z
+    .string()
+    .refine((val) => !isNaN(new Date(val).getTime()), { message: '开始时间格式无效' })
+    .nullish(),
+
+  contactMethod: z.string().max(100, '联系方式不能超过100字符').nullish(),
+
+  durationHours: z.coerce.number().positive().max(999.9).nullish(),
+
+  durationUnit: z.enum(['once', 'day', 'week', 'month']).nullish(),
+
+  posterMemo: z.string().max(1000, '备注不能超过1000字符').nullish(),
 });
 
 /**
@@ -108,7 +128,7 @@ export const taskQuerySchema = z.object({
   maxReward: z
     .coerce
     .number()
-    .max(99999.99, '最高報酬は99999.99以下である必要があります')
+    .max(100000000, '最高報酬は100000000以下である必要があります')
     .optional(),
 
   page: z

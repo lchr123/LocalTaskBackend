@@ -7,7 +7,7 @@ import { apiRateLimiter } from './middleware/rateLimiter';
 import { errorHandler } from './middleware/errorHandler';
 import { healthController } from './controllers/healthController';
 import { taskController } from './controllers/taskController';
-import { intentController, selectHelperRouter } from './controllers/intentController';
+import { intentController, selectHelperRouter, chatWithApplicantRouter } from './controllers/intentController';
 import { chatController } from './controllers/chatController';
 import { reviewController, getUserReviews, getUserReviewsGiven } from './controllers/reviewController';
 import { reportController } from './controllers/reportController';
@@ -78,6 +78,9 @@ app.use('/tasks/:id/intents', intentController);
 
 // Select helper route (POST /tasks/:id/select-helper)
 app.use('/tasks/:id/select-helper', selectHelperRouter);
+
+// Start chat with applicant route (POST /tasks/:id/chat)
+app.use('/tasks/:id/chat', chatWithApplicantRouter);
 
 // Chat routes
 app.use('/chat', chatController);

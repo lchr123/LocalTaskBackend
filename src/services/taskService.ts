@@ -1,6 +1,32 @@
-import { Task, TaskStatus, CreateTaskPayload } from '../types/task';
+import { Task, TaskStatus, CreateTaskPayload, UpdateTaskPayload } from '../types/task';
 import { NotFoundError, ConflictError, ValidationError } from '../utils/errors';
 import * as taskRepository from '../repositories/taskRepository';
+import { getPresignedUrl } from './uploadService';
+
+/**
+ * Presign all task image URLs for secure temporary access (like chat images).
+ */
+async function presignImages(images: string[] | undefined): Promise<string[]> {
+  if (!images || images.length === 0) return [];
+  return Promise.all(images.map((url) => getPresignedUrl(url)));
+}
+
+async function enrichTask(task: Task): Promise<Task> {
+  return { ...task, images: await presignImages(task.images) };
+}
+
+async function enrichTasks(tasks: Task[]): Promise<Task[]> {
+  return Promise.all(tasks.map(enrichTask));
+}
+
+/**
+ * Normalize an image URL for storage: strip any presigned query string so the
+ * DB always holds the clean, stable S3 URL (presigned URLs expire and would
+ * otherwise be re-stored when a task is edited).
+ */
+function cleanImageUrl(url: string): string {
+  return url.split('?')[0];
+}
 
 /**
  * Valid state transitions for the task state machine.
@@ -42,9 +68,14 @@ export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
             t.location_address AS "locationAddress",
             ST_Y(t.location::geometry) AS "latitude",
             ST_X(t.location::geometry) AS "longitude",
-            t.reward, t.deadline, t.status, t.intent_count AS "intentCount",
+            t.reward, t.reward_unit AS "rewardUnit",
+            t.deadline, t.status, t.intent_count AS "intentCount",
             t.selected_helper_id AS "selectedHelperId",
             t.created_at AS "createdAt", t.updated_at AS "updatedAt",
+            t.images AS "images", t.headcount AS "headcount",
+            t.start_time AS "startTime", t.contact_method AS "contactMethod",
+            t.duration_hours::float AS "durationHours", t.duration_unit AS "durationUnit",
+            t.poster_memo AS "posterMemo",
             CASE WHEN r.id IS NOT NULL THEN true ELSE false END AS "hasReview"
      FROM tasks t
      LEFT JOIN reviews r ON r.task_id = t.id AND r.reviewer_id = $1
@@ -52,7 +83,8 @@ export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
      ORDER BY t.created_at DESC`,
     [userId]
   );
-  return { tasks: result.rows };
+  const tasks = await enrichTasks(result.rows);
+  return { tasks };
 }
 
 /**
@@ -61,7 +93,7 @@ export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
  */
 export async function listAcceptedTasks(userId: string): Promise<{ tasks: Task[] }> {
   const tasks = await taskRepository.findAcceptedByUser(userId);
-  return { tasks };
+  return { tasks: await enrichTasks(tasks) };
 }
 
 /**
@@ -79,7 +111,7 @@ export async function listTasks(params: ListTasksParams): Promise<ListTasksRespo
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return {
-    tasks,
+    tasks: await enrichTasks(tasks),
     page,
     totalPages,
     totalCount,
@@ -97,7 +129,7 @@ export async function getTask(taskId: string): Promise<Task> {
     throw new NotFoundError('任务不存在');
   }
 
-  return task;
+  return enrichTask(task);
 }
 
 /**
@@ -110,17 +142,23 @@ export async function createTask(userId: string, payload: CreateTaskPayload): Pr
     throw new ValidationError({ deadline: '截止时间必须晚于当前时间' });
   }
 
-  return taskRepository.create(userId, payload);
+  if (payload.images) {
+    payload = { ...payload, images: payload.images.map(cleanImageUrl) };
+  }
+
+  const task = await taskRepository.create(userId, payload);
+  return enrichTask(task);
 }
 
 /**
- * Update task details (description, reward, location, deadline).
- * Only the task poster can edit, and only when status is 'open'.
+ * Update task details (description, reward, location, deadline, and the new
+ * optional fields). Only the task poster can edit, and only when status is 'open'.
+ * Note: poster_memo is handled separately by updateMemo (editable in any status).
  */
 export async function updateTask(
   taskId: string,
   userId: string,
-  payload: { description?: string; reward?: number; location?: { address: string; latitude: number; longitude: number }; deadline?: string }
+  payload: UpdateTaskPayload
 ): Promise<Task> {
   const task = await taskRepository.findById(taskId);
 
@@ -143,12 +181,41 @@ export async function updateTask(
     }
   }
 
+  if (payload.images) {
+    payload = { ...payload, images: payload.images.map(cleanImageUrl) };
+  }
+
   const updatedTask = await taskRepository.updateDetails(taskId, payload);
   if (!updatedTask) {
     throw new NotFoundError('任务不存在或状态已变更');
   }
 
-  return updatedTask;
+  return enrichTask(updatedTask);
+}
+
+/**
+ * Update the poster's private memo on their own task.
+ * Allowed in any status. Only the poster may do this.
+ */
+export async function updateMemo(
+  taskId: string,
+  userId: string,
+  memo: string | null
+): Promise<Task> {
+  const task = await taskRepository.findById(taskId);
+  if (!task) {
+    throw new NotFoundError('任务不存在');
+  }
+  if (task.posterId !== userId) {
+    throw new ConflictError('forbidden', '无权修改此任务的备注');
+  }
+
+  const updatedTask = await taskRepository.updateMemo(taskId, memo);
+  if (!updatedTask) {
+    throw new NotFoundError('任务不存在');
+  }
+
+  return enrichTask(updatedTask);
 }
 
 /**

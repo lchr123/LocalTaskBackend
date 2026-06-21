@@ -148,3 +148,35 @@ selectHelperRouter.post(
 );
 
 export { selectHelperRouter };
+
+/**
+ * Separate router for the start-chat-with-applicant endpoint,
+ * mounted at /tasks/:id/chat.
+ */
+const chatWithApplicantRouter = Router({ mergeParams: true });
+
+/**
+ * POST /tasks/:id/chat
+ * Poster starts (or reuses) a chat session with an applicant while the task
+ * is still open — without selecting them. Body must contain helperId.
+ * Only the task poster can call this, and only for users with a pending intent.
+ */
+chatWithApplicantRouter.post(
+  '/',
+  authMiddleware as any,
+  validate(selectHelperSchema),
+  async (req: AuthenticatedRequest, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const taskId = req.params.id as string;
+      const posterId = req.user!.userId;
+      const { helperId } = req.body;
+
+      const result = await intentService.startChatWithApplicant(taskId, helperId, posterId);
+      res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+export { chatWithApplicantRouter };

@@ -1,5 +1,5 @@
 import { query } from '../config/database';
-import { Task, TaskStatus, CreateTaskPayload } from '../types/task';
+import { Task, TaskStatus, CreateTaskPayload, UpdateTaskPayload } from '../types/task';
 
 export interface FindNearbyParams {
   lat: number;
@@ -24,16 +24,44 @@ interface TaskRow {
   lng: number;
   lat: number;
   reward: string;
+  reward_unit: string | null;
   deadline: string;
   status: string;
   intent_count: number;
   selected_helper_id: string | null;
   created_at: string;
-  distance: string;
+  images: string[] | null;
+  headcount: number;
+  start_time: string | null;
+  contact_method: string | null;
+  duration_hours: string | null;
+  duration_unit: string | null;
+  poster_memo?: string | null;
+  distance?: string;
 }
 
+/**
+ * Column list (with t. prefix) for the new task fields, shared across SELECTs.
+ * poster_memo is intentionally excluded — it is poster-only and added explicitly
+ * where appropriate.
+ */
+const TASK_EXTRA_SELECT = `
+  t.reward_unit, t.images, t.headcount, t.start_time,
+  t.contact_method, t.duration_hours, t.duration_unit
+`;
+
+/** Same extra columns for RETURNING clauses (no table prefix). */
+const TASK_EXTRA_RETURNING = `
+  reward_unit, images, headcount, start_time,
+  contact_method, duration_hours, duration_unit
+`;
+
+/**
+ * Map a DB row to a Task. Includes poster_memo only when the row carries it
+ * (i.e. it was explicitly selected for a poster-only context).
+ */
 function mapRowToTask(row: TaskRow): Task {
-  return {
+  const task: Task = {
     id: row.id,
     posterId: row.poster_id,
     posterNickname: row.nickname,
@@ -45,16 +73,28 @@ function mapRowToTask(row: TaskRow): Task {
       latitude: row.lat,
       longitude: row.lng,
     },
-    reward: parseFloat(row.reward),
+    reward: typeof row.reward === 'number' ? row.reward : parseInt(row.reward, 10),
+    rewardUnit: (row.reward_unit as Task['rewardUnit']) ?? null,
     deadline: row.deadline,
     status: row.status as Task['status'],
     intentCount: row.intent_count,
     selectedHelperId: row.selected_helper_id ?? undefined,
     createdAt: row.created_at,
+    images: row.images ?? [],
+    headcount: row.headcount ?? 1,
+    startTime: row.start_time ?? null,
+    contactMethod: row.contact_method ?? null,
+    durationHours: row.duration_hours != null ? parseFloat(row.duration_hours) : null,
+    durationUnit: (row.duration_unit as Task['durationUnit']) ?? null,
     distance: row.distance != null ? parseFloat(parseFloat(row.distance).toFixed(2)) : undefined,
   };
-}
 
+  if (row.poster_memo !== undefined) {
+    task.posterMemo = row.poster_memo ?? null;
+  }
+
+  return task;
+}
 
 /**
  * Find nearby open tasks using PostGIS spatial queries.
@@ -63,8 +103,7 @@ function mapRowToTask(row: TaskRow): Task {
 export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
   const { lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset } = params;
 
-  // Dynamic ORDER BY based on sort parameter
-  let orderBy = 'distance ASC'; // default
+  let orderBy = 'distance ASC';
   switch (sort) {
     case 'reward': orderBy = 't.reward DESC'; break;
     case 'newest': orderBy = 't.created_at DESC'; break;
@@ -79,6 +118,7 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
            ST_Y(t.location::geometry) AS lat,
            t.reward, t.deadline, t.status, t.intent_count,
            t.selected_helper_id, t.created_at,
+           ${TASK_EXTRA_SELECT},
            ST_Distance(t.location, ST_SetSRID(ST_MakePoint($1, $2), 4326)) / 1000 AS distance
     FROM tasks t
     JOIN users u ON t.poster_id = u.id
@@ -92,14 +132,14 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
   `;
 
   const values = [
-    lng,          // $1
-    lat,          // $2
-    radius,       // $3
-    type ? type.split(',') : null, // $4 - array of types or null
-    minReward ?? null, // $5
-    maxReward ?? null, // $6
-    pageSize,     // $7
-    offset,       // $8
+    lng,
+    lat,
+    radius,
+    type ? type.split(',') : null,
+    minReward ?? null,
+    maxReward ?? null,
+    pageSize,
+    offset,
   ];
 
   const result = await query<TaskRow>(sql, values);
@@ -108,7 +148,6 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
 
 /**
  * Count nearby open tasks matching the same filters as findNearby.
- * Used to calculate totalCount for pagination.
  */
 export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'offset'>): Promise<number> {
   const { lat, lng, radius, type, minReward, maxReward } = params;
@@ -124,12 +163,12 @@ export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'o
   `;
 
   const values = [
-    lng,          // $1
-    lat,          // $2
-    radius,       // $3
-    type ? type.split(',') : null, // $4 - array of types or null
-    minReward ?? null, // $5
-    maxReward ?? null, // $6
+    lng,
+    lat,
+    radius,
+    type ? type.split(',') : null,
+    minReward ?? null,
+    maxReward ?? null,
   ];
 
   const result = await query<{ count: string }>(sql, values);
@@ -137,7 +176,7 @@ export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'o
 }
 
 /**
- * Find a single task by ID, joining users to get poster nickname and rating.
+ * Find a single task by ID. Public endpoint — does NOT include poster_memo.
  */
 export async function findById(taskId: string): Promise<Task | null> {
   const sql = `
@@ -146,130 +185,108 @@ export async function findById(taskId: string): Promise<Task | null> {
            ST_X(t.location::geometry) AS lng,
            ST_Y(t.location::geometry) AS lat,
            t.reward, t.deadline, t.status, t.intent_count,
-           t.selected_helper_id, t.created_at
+           t.selected_helper_id, t.created_at,
+           ${TASK_EXTRA_SELECT}
     FROM tasks t
     JOIN users u ON t.poster_id = u.id
     WHERE t.id = $1
   `;
 
-  const result = await query<Omit<TaskRow, 'distance'>>(sql, [taskId]);
-
+  const result = await query<TaskRow>(sql, [taskId]);
   if (result.rows.length === 0) {
     return null;
   }
-
-  const row = result.rows[0];
-  return {
-    id: row.id,
-    posterId: row.poster_id,
-    posterNickname: row.nickname,
-    posterRating: parseFloat(row.average_rating),
-    type: row.type as Task['type'],
-    description: row.description,
-    location: {
-      address: row.location_address,
-      latitude: row.lat,
-      longitude: row.lng,
-    },
-    reward: parseFloat(row.reward),
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    intentCount: row.intent_count,
-    selectedHelperId: row.selected_helper_id ?? undefined,
-    createdAt: row.created_at,
-  };
+  return mapRowToTask(result.rows[0]);
 }
 
 /**
  * Create a new task, storing coordinates as PostGIS geography point.
+ * Returns the task including poster_memo (creator is the poster).
  */
 export async function create(userId: string, payload: CreateTaskPayload): Promise<Task> {
   const sql = `
-    INSERT INTO tasks (poster_id, type, description, location_address, location, reward, deadline)
-    VALUES ($1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326), $7, $8)
+    INSERT INTO tasks (
+      poster_id, type, description, location_address, location,
+      reward, reward_unit, deadline, images, headcount,
+      start_time, contact_method, duration_hours, duration_unit, poster_memo
+    )
+    VALUES (
+      $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326),
+      $7, $8, $9, $10, $11,
+      $12, $13, $14, $15, $16
+    )
     RETURNING id, poster_id, type, description, location_address,
               ST_X(location::geometry) AS lng,
               ST_Y(location::geometry) AS lat,
               reward, deadline, status, intent_count,
-              selected_helper_id, created_at
+              selected_helper_id, created_at, poster_memo,
+              ${TASK_EXTRA_RETURNING}
   `;
 
   const values = [
-    userId,                    // $1
-    payload.type,              // $2
-    payload.description,       // $3
-    payload.location.address,  // $4
-    payload.location.longitude, // $5
-    payload.location.latitude,  // $6
-    payload.reward,            // $7
-    payload.deadline,          // $8
+    userId,                          // $1
+    payload.type,                    // $2
+    payload.description,             // $3
+    payload.location.address,        // $4
+    payload.location.longitude,      // $5
+    payload.location.latitude,       // $6
+    payload.reward,                  // $7
+    payload.rewardUnit ?? null,      // $8
+    payload.deadline,                // $9
+    payload.images ?? [],            // $10 (pg maps JS array -> text[])
+    payload.headcount ?? 1,          // $11
+    payload.startTime ?? null,       // $12
+    payload.contactMethod ?? null,   // $13
+    payload.durationHours ?? null,   // $14
+    payload.durationUnit ?? null,    // $15
+    payload.posterMemo ?? null,      // $16
   ];
 
-  const result = await query<Omit<TaskRow, 'distance' | 'nickname' | 'average_rating'>>(sql, values);
+  const result = await query<TaskRow>(sql, values);
   const row = result.rows[0];
 
-  // Fetch poster info separately since RETURNING can't JOIN
   const userResult = await query<{ nickname: string; average_rating: string }>(
     'SELECT nickname, average_rating FROM users WHERE id = $1',
     [userId]
   );
   const user = userResult.rows[0];
+  row.nickname = user?.nickname ?? '';
+  row.average_rating = user?.average_rating ?? '0';
 
-  return {
-    id: row.id,
-    posterId: row.poster_id,
-    posterNickname: user?.nickname ?? '',
-    posterRating: user ? parseFloat(user.average_rating) : 0,
-    type: row.type as Task['type'],
-    description: row.description,
-    location: {
-      address: row.location_address,
-      latitude: row.lat,
-      longitude: row.lng,
-    },
-    reward: parseFloat(row.reward),
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    intentCount: row.intent_count,
-    selectedHelperId: row.selected_helper_id ?? undefined,
-    createdAt: row.created_at,
-  };
+  return mapRowToTask(row);
 }
 
 /**
- * Update task details (description, reward, location, deadline).
- * Only allowed when task status is 'open'.
+ * Update task details. Only allowed when task status is 'open'.
+ * Does NOT touch poster_memo (handled by updateMemo).
  */
 export async function updateDetails(
   taskId: string,
-  payload: { description?: string; reward?: number; location?: { address: string; latitude: number; longitude: number }; deadline?: string }
+  payload: UpdateTaskPayload
 ): Promise<Task | null> {
   const setClauses: string[] = ['updated_at = NOW()'];
   const values: any[] = [taskId];
   let paramIndex = 2;
 
-  if (payload.description !== undefined) {
-    setClauses.push(`description = $${paramIndex}`);
-    values.push(payload.description);
+  const pushSet = (column: string, value: unknown) => {
+    setClauses.push(`${column} = $${paramIndex}`);
+    values.push(value);
     paramIndex++;
-  }
+  };
 
-  if (payload.reward !== undefined) {
-    setClauses.push(`reward = $${paramIndex}`);
-    values.push(payload.reward);
-    paramIndex++;
-  }
-
-  if (payload.deadline !== undefined) {
-    setClauses.push(`deadline = $${paramIndex}`);
-    values.push(payload.deadline);
-    paramIndex++;
-  }
+  if (payload.description !== undefined) pushSet('description', payload.description);
+  if (payload.reward !== undefined) pushSet('reward', payload.reward);
+  if (payload.deadline !== undefined) pushSet('deadline', payload.deadline);
+  if (payload.rewardUnit !== undefined) pushSet('reward_unit', payload.rewardUnit);
+  if (payload.images !== undefined) pushSet('images', payload.images);
+  if (payload.headcount !== undefined) pushSet('headcount', payload.headcount);
+  if (payload.startTime !== undefined) pushSet('start_time', payload.startTime);
+  if (payload.contactMethod !== undefined) pushSet('contact_method', payload.contactMethod);
+  if (payload.durationHours !== undefined) pushSet('duration_hours', payload.durationHours);
+  if (payload.durationUnit !== undefined) pushSet('duration_unit', payload.durationUnit);
 
   if (payload.location) {
-    setClauses.push(`location_address = $${paramIndex}`);
-    values.push(payload.location.address);
-    paramIndex++;
+    pushSet('location_address', payload.location.address);
     setClauses.push(`location = ST_SetSRID(ST_MakePoint($${paramIndex}, $${paramIndex + 1}), 4326)`);
     values.push(payload.location.longitude);
     paramIndex++;
@@ -285,42 +302,59 @@ export async function updateDetails(
               ST_X(location::geometry) AS lng,
               ST_Y(location::geometry) AS lat,
               reward, deadline, status, intent_count,
-              selected_helper_id, created_at
+              selected_helper_id, created_at,
+              ${TASK_EXTRA_RETURNING}
   `;
 
-  const result = await query<Omit<TaskRow, 'distance' | 'nickname' | 'average_rating'>>(sql, values);
-
+  const result = await query<TaskRow>(sql, values);
   if (result.rows.length === 0) {
     return null;
   }
 
   const row = result.rows[0];
-
   const userResult = await query<{ nickname: string; average_rating: string }>(
     'SELECT nickname, average_rating FROM users WHERE id = $1',
     [row.poster_id]
   );
   const user = userResult.rows[0];
+  row.nickname = user?.nickname ?? '';
+  row.average_rating = user?.average_rating ?? '0';
 
-  return {
-    id: row.id,
-    posterId: row.poster_id,
-    posterNickname: user?.nickname ?? '',
-    posterRating: user ? parseFloat(user.average_rating) : 0,
-    type: row.type as Task['type'],
-    description: row.description,
-    location: {
-      address: row.location_address,
-      latitude: row.lat,
-      longitude: row.lng,
-    },
-    reward: parseFloat(row.reward),
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    intentCount: row.intent_count,
-    selectedHelperId: row.selected_helper_id ?? undefined,
-    createdAt: row.created_at,
-  };
+  return mapRowToTask(row);
+}
+
+/**
+ * Update the poster's private memo. Allowed in any status; poster ownership is
+ * verified in the service layer. Returns the task including poster_memo.
+ */
+export async function updateMemo(taskId: string, memo: string | null): Promise<Task | null> {
+  const sql = `
+    UPDATE tasks
+    SET poster_memo = $2, updated_at = NOW()
+    WHERE id = $1
+    RETURNING id, poster_id, type, description, location_address,
+              ST_X(location::geometry) AS lng,
+              ST_Y(location::geometry) AS lat,
+              reward, deadline, status, intent_count,
+              selected_helper_id, created_at, poster_memo,
+              ${TASK_EXTRA_RETURNING}
+  `;
+
+  const result = await query<TaskRow>(sql, [taskId, memo]);
+  if (result.rows.length === 0) {
+    return null;
+  }
+
+  const row = result.rows[0];
+  const userResult = await query<{ nickname: string; average_rating: string }>(
+    'SELECT nickname, average_rating FROM users WHERE id = $1',
+    [row.poster_id]
+  );
+  const user = userResult.rows[0];
+  row.nickname = user?.nickname ?? '';
+  row.average_rating = user?.average_rating ?? '0';
+
+  return mapRowToTask(row);
 }
 
 /**
@@ -331,7 +365,6 @@ export async function updateStatusAndClearHelper(
   taskId: string,
   status: TaskStatus
 ): Promise<Task | null> {
-  // Reset all selected and rejected intents back to pending
   await query(
     `UPDATE intents SET status = 'pending', updated_at = NOW()
      WHERE task_id = $1 AND status IN ('selected', 'rejected')`,
@@ -346,47 +379,29 @@ export async function updateStatusAndClearHelper(
               ST_X(location::geometry) AS lng,
               ST_Y(location::geometry) AS lat,
               reward, deadline, status, intent_count,
-              selected_helper_id, created_at
+              selected_helper_id, created_at,
+              ${TASK_EXTRA_RETURNING}
   `;
 
-  const result = await query<Omit<TaskRow, 'distance' | 'nickname' | 'average_rating'>>(sql, [taskId, status]);
-
+  const result = await query<TaskRow>(sql, [taskId, status]);
   if (result.rows.length === 0) {
     return null;
   }
 
   const row = result.rows[0];
-
   const userResult = await query<{ nickname: string; average_rating: string }>(
     'SELECT nickname, average_rating FROM users WHERE id = $1',
     [row.poster_id]
   );
   const user = userResult.rows[0];
+  row.nickname = user?.nickname ?? '';
+  row.average_rating = user?.average_rating ?? '0';
 
-  return {
-    id: row.id,
-    posterId: row.poster_id,
-    posterNickname: user?.nickname ?? '',
-    posterRating: user ? parseFloat(user.average_rating) : 0,
-    type: row.type as Task['type'],
-    description: row.description,
-    location: {
-      address: row.location_address,
-      latitude: row.lat,
-      longitude: row.lng,
-    },
-    reward: parseFloat(row.reward),
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    intentCount: row.intent_count,
-    selectedHelperId: row.selected_helper_id ?? undefined,
-    createdAt: row.created_at,
-  };
+  return mapRowToTask(row);
 }
 
 /**
  * Find tasks accepted by a user (where user is the selected helper).
- * Ordered by creation time (newest first).
  */
 export async function findAcceptedByUser(userId: string): Promise<Task[]> {
   const sql = `
@@ -395,33 +410,16 @@ export async function findAcceptedByUser(userId: string): Promise<Task[]> {
            ST_X(t.location::geometry) AS lng,
            ST_Y(t.location::geometry) AS lat,
            t.reward, t.deadline, t.status, t.intent_count,
-           t.selected_helper_id, t.created_at
+           t.selected_helper_id, t.created_at,
+           ${TASK_EXTRA_SELECT}
     FROM tasks t
     JOIN users u ON t.poster_id = u.id
     WHERE t.selected_helper_id = $1
     ORDER BY t.created_at DESC
   `;
 
-  const result = await query<Omit<TaskRow, 'distance'>>(sql, [userId]);
-  return result.rows.map((row) => ({
-    id: row.id,
-    posterId: row.poster_id,
-    posterNickname: row.nickname,
-    posterRating: parseFloat(row.average_rating),
-    type: row.type as Task['type'],
-    description: row.description,
-    location: {
-      address: row.location_address,
-      latitude: row.lat,
-      longitude: row.lng,
-    },
-    reward: parseFloat(row.reward),
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    intentCount: row.intent_count,
-    selectedHelperId: row.selected_helper_id ?? undefined,
-    createdAt: row.created_at,
-  }));
+  const result = await query<TaskRow>(sql, [userId]);
+  return result.rows.map(mapRowToTask);
 }
 
 /**
@@ -441,7 +439,8 @@ export async function updateStatus(
                 ST_X(location::geometry) AS lng,
                 ST_Y(location::geometry) AS lat,
                 reward, deadline, status, intent_count,
-                selected_helper_id, created_at
+                selected_helper_id, created_at,
+                ${TASK_EXTRA_RETURNING}
     `
     : `
       UPDATE tasks
@@ -451,45 +450,27 @@ export async function updateStatus(
                 ST_X(location::geometry) AS lng,
                 ST_Y(location::geometry) AS lat,
                 reward, deadline, status, intent_count,
-                selected_helper_id, created_at
+                selected_helper_id, created_at,
+                ${TASK_EXTRA_RETURNING}
     `;
 
   const values = selectedHelperId
     ? [taskId, status, selectedHelperId]
     : [taskId, status];
 
-  const result = await query<Omit<TaskRow, 'distance' | 'nickname' | 'average_rating'>>(sql, values);
-
+  const result = await query<TaskRow>(sql, values);
   if (result.rows.length === 0) {
     return null;
   }
 
   const row = result.rows[0];
-
-  // Fetch poster info
   const userResult = await query<{ nickname: string; average_rating: string }>(
     'SELECT nickname, average_rating FROM users WHERE id = $1',
     [row.poster_id]
   );
   const user = userResult.rows[0];
+  row.nickname = user?.nickname ?? '';
+  row.average_rating = user?.average_rating ?? '0';
 
-  return {
-    id: row.id,
-    posterId: row.poster_id,
-    posterNickname: user?.nickname ?? '',
-    posterRating: user ? parseFloat(user.average_rating) : 0,
-    type: row.type as Task['type'],
-    description: row.description,
-    location: {
-      address: row.location_address,
-      latitude: row.lat,
-      longitude: row.lng,
-    },
-    reward: parseFloat(row.reward),
-    deadline: row.deadline,
-    status: row.status as Task['status'],
-    intentCount: row.intent_count,
-    selectedHelperId: row.selected_helper_id ?? undefined,
-    createdAt: row.created_at,
-  };
+  return mapRowToTask(row);
 }

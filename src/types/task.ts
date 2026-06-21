@@ -1,6 +1,11 @@
 export type TaskType = string;
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
 
+/** Billing unit for the reward amount. */
+export type RewardUnit = 'once' | 'hour' | 'day' | 'month';
+/** Per-unit for the estimated duration (e.g. "2.5 小时/次"). */
+export type DurationUnit = 'once' | 'day' | 'week' | 'month';
+
 export interface Task {
   id: string;
   posterId: string;
@@ -14,12 +19,31 @@ export interface Task {
     longitude: number;
   };
   reward: number;
+  /** Optional billing unit; null means unspecified. */
+  rewardUnit?: RewardUnit | null;
   deadline: string;
   status: TaskStatus;
   intentCount: number;
   selectedHelperId?: string;
   createdAt: string;
   distance?: number;
+  /** Task photo URLs (full S3 URLs, presigned on read). */
+  images: string[];
+  /** Number of helpers to recruit (>= 1). */
+  headcount: number;
+  /** Planned start time (ISO string) or null. */
+  startTime?: string | null;
+  /** Preferred contact method (free text) or null. */
+  contactMethod?: string | null;
+  /** Estimated duration in hours or null. */
+  durationHours?: number | null;
+  /** Per-unit for durationHours or null. */
+  durationUnit?: DurationUnit | null;
+  /**
+   * Poster-only private memo. Only populated when the requester is the poster
+   * (e.g. GET /tasks/mine). Never exposed on public endpoints.
+   */
+  posterMemo?: string | null;
 }
 
 export interface CreateTaskPayload {
@@ -32,4 +56,26 @@ export interface CreateTaskPayload {
   };
   reward: number;
   deadline: string;
+  rewardUnit?: RewardUnit | null;
+  images?: string[];
+  headcount?: number;
+  startTime?: string | null;
+  contactMethod?: string | null;
+  durationHours?: number | null;
+  durationUnit?: DurationUnit | null;
+  posterMemo?: string | null;
+}
+
+export interface UpdateTaskPayload {
+  description?: string;
+  reward?: number;
+  location?: { address: string; latitude: number; longitude: number };
+  deadline?: string;
+  rewardUnit?: RewardUnit | null;
+  images?: string[];
+  headcount?: number;
+  startTime?: string | null;
+  contactMethod?: string | null;
+  durationHours?: number | null;
+  durationUnit?: DurationUnit | null;
 }

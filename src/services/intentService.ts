@@ -17,6 +17,7 @@ import { query, getClient } from '../config/database';
 import * as intentRepository from '../repositories/intentRepository';
 import * as taskRepository from '../repositories/taskRepository';
 import * as notificationService from './notificationService';
+import * as chatService from './chatService';
 import { logger } from '../utils/logger';
 
 /**
@@ -265,6 +266,49 @@ export async function selectHelper(
   }
 
   return updatedTask;
+}
+
+/**
+ * Start (or reuse) a chat session between the task poster and an applicant,
+ * WITHOUT selecting them. Used so the poster can chat with individual
+ * applicants while the task is still open.
+ *
+ * Business rules:
+ * - Requester must be the task poster
+ * - The target helper must have a pending intent on this task (an actual applicant)
+ *
+ * The task status is left unchanged. Session creation is idempotent.
+ *
+ * Returns the session id plus the info needed to open the chat room.
+ */
+export async function startChatWithApplicant(
+  taskId: string,
+  helperId: string,
+  posterId: string
+): Promise<{ sessionId: string; taskId: string; taskTitle: string; taskType: string }> {
+  const task = await taskRepository.findById(taskId);
+  if (!task) {
+    throw new NotFoundError('任务不存在');
+  }
+
+  if (task.posterId !== posterId) {
+    throw new ForbiddenError('无权执行此操作');
+  }
+
+  // Only allow chatting with users who actually applied (pending intent)
+  const helperIntent = await intentRepository.findPendingByTaskAndHelper(taskId, helperId);
+  if (!helperIntent) {
+    throw new NotFoundError('该用户没有待处理的申请');
+  }
+
+  const sessionId = await chatService.createSessionIfNotExists(taskId, posterId, helperId);
+
+  return {
+    sessionId,
+    taskId,
+    taskTitle: (task.description || '').slice(0, 50),
+    taskType: task.type,
+  };
 }
 
 /**

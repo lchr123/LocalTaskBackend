@@ -10,7 +10,7 @@
  * Validates: Requirements 6.3, 6.4, 6.5, 6.6
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from '@aws-sdk/client-s3';
+import { S3Client, PutObjectCommand, GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
@@ -47,7 +47,7 @@ export interface UploadedFile {
  *
  * Validates: Requirements 6.3, 6.4, 6.5, 6.6
  */
-export type UploadFolder = 'avatars' | 'chats';
+export type UploadFolder = 'avatars' | 'chats' | 'tasks';
 
 /**
  * Upload an image file to S3.
@@ -120,4 +120,67 @@ export async function getPresignedUrl(imageUrl: string): Promise<string> {
 
   const presignedUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
   return presignedUrl;
+}
+
+/**
+ * Extract the S3 object key from a (clean or presigned) bucket URL.
+ * Returns null if the URL is not from our bucket.
+ */
+export function extractKeyFromUrl(url: string): string | null {
+  const clean = url.split('?')[0];
+  const prefix = `https://${config.s3.bucket}.s3.${config.s3.region}.amazonaws.com/`;
+  if (!clean.startsWith(prefix)) return null;
+  return clean.slice(prefix.length);
+}
+
+/**
+ * List all objects under a given prefix (paginated).
+ */
+export async function listObjectsByPrefix(
+  prefix: string
+): Promise<{ key: string; lastModified: Date }[]> {
+  const out: { key: string; lastModified: Date }[] = [];
+  let token: string | undefined;
+
+  do {
+    const res = await s3Client.send(
+      new ListObjectsV2Command({
+        Bucket: config.s3.bucket,
+        Prefix: prefix,
+        ContinuationToken: token,
+      })
+    );
+    for (const obj of res.Contents || []) {
+      if (obj.Key) {
+        out.push({ key: obj.Key, lastModified: obj.LastModified || new Date(0) });
+      }
+    }
+    token = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (token);
+
+  return out;
+}
+
+/**
+ * Delete S3 objects by key, in batches of 1000 (S3 DeleteObjects limit).
+ *
+ * SAFETY: only keys under the `tasks/` prefix are ever deleted; any other key
+ * is filtered out, so this can never touch avatars/ or chats/.
+ */
+export async function deleteObjects(keys: string[]): Promise<number> {
+  const safeKeys = keys.filter((k) => k.startsWith('tasks/'));
+  if (safeKeys.length === 0) return 0;
+
+  let deleted = 0;
+  for (let i = 0; i < safeKeys.length; i += 1000) {
+    const batch = safeKeys.slice(i, i + 1000);
+    await s3Client.send(
+      new DeleteObjectsCommand({
+        Bucket: config.s3.bucket,
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+      })
+    );
+    deleted += batch.length;
+  }
+  return deleted;
 }

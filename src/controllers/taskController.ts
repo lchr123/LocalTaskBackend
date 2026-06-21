@@ -146,20 +146,62 @@ router.patch(
     try {
       const authReq = req as AuthenticatedRequest;
       const taskId = req.params.id as string;
-      const { description, reward, location, deadline } = req.body;
+      const {
+        description, reward, location, deadline,
+        rewardUnit, images, headcount, startTime,
+        contactMethod, durationHours, durationUnit,
+      } = req.body;
 
-      if (!description && reward === undefined && !location && !deadline) {
+      const payload: Record<string, unknown> = {};
+      if (description !== undefined) payload.description = description;
+      if (reward !== undefined) payload.reward = reward;
+      if (location !== undefined) payload.location = location;
+      if (deadline !== undefined) payload.deadline = deadline;
+      if (rewardUnit !== undefined) payload.rewardUnit = rewardUnit;
+      if (images !== undefined) payload.images = images;
+      if (headcount !== undefined) payload.headcount = headcount;
+      if (startTime !== undefined) payload.startTime = startTime;
+      if (contactMethod !== undefined) payload.contactMethod = contactMethod;
+      if (durationHours !== undefined) payload.durationHours = durationHours;
+      if (durationUnit !== undefined) payload.durationUnit = durationUnit;
+
+      if (Object.keys(payload).length === 0) {
         res.status(422).json({ error: 'validation_error', message: '请提供需要修改的字段' });
         return;
       }
 
-      const payload: { description?: string; reward?: number; location?: { address: string; latitude: number; longitude: number }; deadline?: string } = {};
-      if (description) payload.description = description;
-      if (reward !== undefined) payload.reward = reward;
-      if (location) payload.location = location;
-      if (deadline) payload.deadline = deadline;
-
       const updatedTask = await taskService.updateTask(taskId, authReq.user!.userId, payload);
+      res.status(200).json(updatedTask);
+    } catch (err) {
+      next(err);
+    }
+  }
+);
+
+/**
+ * PATCH /tasks/:id/memo
+ * Update the poster's private memo on their own task.
+ * Poster-only; allowed in any task status. Body: { posterMemo: string | null }.
+ */
+router.patch(
+  '/:id/memo',
+  authMiddleware as any,
+  async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    try {
+      const authReq = req as AuthenticatedRequest;
+      const taskId = req.params.id as string;
+      const { posterMemo } = req.body;
+
+      if (posterMemo !== null && typeof posterMemo !== 'string') {
+        res.status(422).json({ error: 'validation_error', message: 'posterMemo 必须是字符串或 null' });
+        return;
+      }
+      if (typeof posterMemo === 'string' && posterMemo.length > 1000) {
+        res.status(422).json({ error: 'validation_error', message: '备注不能超过1000字符' });
+        return;
+      }
+
+      const updatedTask = await taskService.updateMemo(taskId, authReq.user!.userId, posterMemo ?? null);
       res.status(200).json(updatedTask);
     } catch (err) {
       next(err);
