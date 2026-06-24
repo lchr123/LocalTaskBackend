@@ -35,7 +35,10 @@ router.get('/', async (req: Request, res: Response, next: NextFunction): Promise
       return;
     }
 
-    const response = await taskService.listTasks(result.data);
+    const response = await taskService.listTasks({
+      ...result.data,
+      tagIds: result.data.tags ? result.data.tags.split(',').filter(Boolean) : undefined,
+    });
     res.status(200).json(response);
   } catch (err) {
     next(err);
@@ -102,6 +105,19 @@ router.get('/accepted', authMiddleware as any, async (req: Request, res: Respons
 });
 
 /**
+ * GET /tasks/tags
+ * List the task tag dictionary (public).
+ */
+router.get('/tags', async (_req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const tags = await taskService.listTaskTags();
+    res.status(200).json({ tags });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /tasks/:id
  * Get a single task by ID.
  */
@@ -149,7 +165,7 @@ router.patch(
       const {
         description, reward, location, deadline,
         rewardUnit, images, headcount, startTime,
-        contactMethod, durationHours, durationUnit,
+        contactMethod, durationHours, durationUnit, tagIds,
       } = req.body;
 
       const payload: Record<string, unknown> = {};
@@ -164,6 +180,7 @@ router.patch(
       if (contactMethod !== undefined) payload.contactMethod = contactMethod;
       if (durationHours !== undefined) payload.durationHours = durationHours;
       if (durationUnit !== undefined) payload.durationUnit = durationUnit;
+      if (tagIds !== undefined) payload.tagIds = tagIds;
 
       if (Object.keys(payload).length === 0) {
         res.status(422).json({ error: 'validation_error', message: '请提供需要修改的字段' });

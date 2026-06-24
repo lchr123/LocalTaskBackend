@@ -114,8 +114,214 @@ function LoginPage({ onLogin }: { onLogin: () => void }) {
 
 // ─── Dashboard ───────────────────────────────────────────────────────────────
 
+// ─── Tag dictionary manager (task_tags & helper_tags) ────────────────────────
+
+function TagsManager() {
+  const [kind, setKind] = useState<'task' | 'helper'>('task');
+  const [tags, setTags] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  // New tag form
+  const [newName, setNewName] = useState('');
+  const [newLabel, setNewLabel] = useState('');
+  const [newCategory, setNewCategory] = useState('');
+
+  // Inline edit state
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editLabel, setEditLabel] = useState('');
+  const [editCategory, setEditCategory] = useState('');
+
+  const loadTags = async (k: 'task' | 'helper') => {
+    setLoading(true);
+    try {
+      const result = await apiRequest(`/tags?kind=${k}`);
+      setTags(result.tags || []);
+    } catch {
+      setTags([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadTags(kind);
+    // reset forms when switching dictionary
+    setEditId(null);
+    setNewName('');
+    setNewLabel('');
+    setNewCategory('');
+  }, [kind]);
+
+  const handleCreate = async () => {
+    if (!newName.trim() || !newLabel.trim()) {
+      alert('name 和 中文名 必填');
+      return;
+    }
+    try {
+      const res = await apiRequest(`/tags?kind=${kind}`, {
+        method: 'POST',
+        body: JSON.stringify({
+          name: newName.trim(),
+          label_zh: newLabel.trim(),
+          category: newCategory.trim() || null,
+        }),
+      });
+      if (res?.error) {
+        alert(res.message || '创建失败');
+        return;
+      }
+      setNewName('');
+      setNewLabel('');
+      setNewCategory('');
+      loadTags(kind);
+    } catch {
+      alert('创建失败');
+    }
+  };
+
+  const startEdit = (t: any) => {
+    setEditId(t.id);
+    setEditName(t.name);
+    setEditLabel(t.label_zh);
+    setEditCategory(t.category || '');
+  };
+
+  const handleSaveEdit = async (id: string) => {
+    if (!editName.trim() || !editLabel.trim()) {
+      alert('name 和 中文名 必填');
+      return;
+    }
+    try {
+      const res = await apiRequest(`/tags/${id}?kind=${kind}`, {
+        method: 'PATCH',
+        body: JSON.stringify({
+          name: editName.trim(),
+          label_zh: editLabel.trim(),
+          category: editCategory.trim() || null,
+        }),
+      });
+      if (res?.error) {
+        alert(res.message || '保存失败');
+        return;
+      }
+      setEditId(null);
+      loadTags(kind);
+    } catch {
+      alert('保存失败');
+    }
+  };
+
+  const handleDelete = async (t: any) => {
+    const usage = t.usage_count || 0;
+    const warn =
+      usage > 0
+        ? `标签「${t.label_zh}」当前被 ${usage} 个${kind === 'task' ? '任务' : '用户'}使用，删除后这些关联也会移除。确定删除？`
+        : `确定删除标签「${t.label_zh}」？`;
+    if (!confirm(warn)) return;
+    try {
+      await apiRequest(`/tags/${t.id}?kind=${kind}`, { method: 'DELETE' });
+      loadTags(kind);
+    } catch {
+      alert('删除失败');
+    }
+  };
+
+  return (
+    <div style={{ padding: 16 }}>
+      {/* Dictionary switcher */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <button
+          onClick={() => setKind('task')}
+          style={{ ...styles.navBtn, ...(kind === 'task' ? styles.navBtnActive : {}) }}
+        >
+          📋 任务标签
+        </button>
+        <button
+          onClick={() => setKind('helper')}
+          style={{ ...styles.navBtn, ...(kind === 'helper' ? styles.navBtnActive : {}) }}
+        >
+          👤 帮手标签
+        </button>
+      </div>
+
+      {/* New tag form */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="name (英文唯一标识, 如 weekend)"
+          value={newName}
+          onChange={(e) => setNewName(e.target.value)}
+          style={{ ...styles.searchInput, width: 220 }}
+        />
+        <input
+          type="text"
+          placeholder="中文名 (如 周末)"
+          value={newLabel}
+          onChange={(e) => setNewLabel(e.target.value)}
+          style={{ ...styles.searchInput, width: 160 }}
+        />
+        <input
+          type="text"
+          placeholder="分类 (可选, 如 scene)"
+          value={newCategory}
+          onChange={(e) => setNewCategory(e.target.value)}
+          style={{ ...styles.searchInput, width: 160 }}
+        />
+        <button onClick={handleCreate} style={styles.detailBtn}>+ 新增标签</button>
+      </div>
+
+      {loading ? (
+        <p style={{ textAlign: 'center', padding: 40 }}>加载中...</p>
+      ) : (
+        <div style={styles.tableContainer}>
+          <table style={styles.table}>
+            <thead>
+              <tr>
+                <th>name</th><th>中文名</th><th>分类</th><th>使用数</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tags.map((t: any) => (
+                <tr key={t.id}>
+                  {editId === t.id ? (
+                    <>
+                      <td><input value={editName} onChange={(e) => setEditName(e.target.value)} style={{ ...styles.searchInput, width: 160 }} /></td>
+                      <td><input value={editLabel} onChange={(e) => setEditLabel(e.target.value)} style={{ ...styles.searchInput, width: 120 }} /></td>
+                      <td><input value={editCategory} onChange={(e) => setEditCategory(e.target.value)} style={{ ...styles.searchInput, width: 120 }} /></td>
+                      <td>{t.usage_count ?? 0}</td>
+                      <td style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => handleSaveEdit(t.id)} style={styles.detailBtn}>保存</button>
+                        <button onClick={() => setEditId(null)} style={styles.select}>取消</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{t.name}</td>
+                      <td>{t.label_zh}</td>
+                      <td>{t.category || '-'}</td>
+                      <td>{t.usage_count ?? 0}</td>
+                      <td style={{ display: 'flex', gap: 6 }}>
+                        <button onClick={() => startEdit(t)} style={styles.detailBtn}>编辑</button>
+                        <button onClick={() => handleDelete(t)} style={{ ...styles.detailBtn, background: '#d32f2f', color: '#fff', borderColor: '#d32f2f' }}>删除</button>
+                      </td>
+                    </>
+                  )}
+                </tr>
+              ))}
+              {tags.length === 0 && (
+                <tr><td colSpan={5} style={{ textAlign: 'center', padding: 24, color: '#999' }}>暂无标签</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard() {
-  const [tab, setTab] = useState<'users' | 'tasks' | 'reports' | 'chats' | 'reviews' | 'bans'>('users');
+  const [tab, setTab] = useState<'users' | 'tasks' | 'reports' | 'chats' | 'reviews' | 'bans' | 'tags'>('users');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -136,6 +342,11 @@ function Dashboard() {
   }, [tab, page, statusFilter, searchQuery]);
 
   const loadData = async () => {
+    // The tags tab manages its own data via the TagsManager component.
+    if (tab === 'tags') {
+      setData(null);
+      return;
+    }
     setLoading(true);
     try {
       const params = new URLSearchParams({ page: String(page), pageSize: '20' });
@@ -213,6 +424,25 @@ function Dashboard() {
     }
   };
 
+  const TASK_TYPE_LABELS: Record<string, string> = {
+    full_time: '全职',
+    part_time: '兼职',
+    one_time: '单次任务',
+  };
+
+  const handleTypeChange = async (id: string, newType: string) => {
+    if (!confirm(`确定将类型改为「${TASK_TYPE_LABELS[newType] || newType}」？`)) return;
+    try {
+      await apiRequest(`/tasks/${id}/type`, {
+        method: 'PATCH',
+        body: JSON.stringify({ type: newType }),
+      });
+      loadData();
+    } catch {
+      alert('操作失败');
+    }
+  };
+
   const handleLogout = () => {
     clearToken();
     window.location.reload();
@@ -226,16 +456,18 @@ function Dashboard() {
       </header>
 
       <nav style={styles.nav}>
-        {(['users', 'tasks', 'reports', 'chats', 'reviews', 'bans'] as const).map((t) => (
+        {(['users', 'tasks', 'reports', 'chats', 'reviews', 'bans', 'tags'] as const).map((t) => (
           <button
             key={t}
             onClick={() => { setTab(t); setPage(1); setStatusFilter(''); setSearchQuery(''); }}
             style={{ ...styles.navBtn, ...(tab === t ? styles.navBtnActive : {}) }}
           >
-            {{ users: '👤 用户', tasks: '📋 任务', reports: '🚨 投诉', chats: '💬 对话', reviews: '⭐ 评价', bans: '🚫 封禁' }[t]}
+            {{ users: '👤 用户', tasks: '📋 任务', reports: '🚨 投诉', chats: '💬 对话', reviews: '⭐ 评价', bans: '🚫 封禁', tags: '🏷️ 标签' }[t]}
           </button>
         ))}
       </nav>
+
+      {tab === 'tags' && <TagsManager />}
 
       {tab === 'users' && (
         <div style={styles.filters}>
@@ -341,12 +573,22 @@ function Dashboard() {
                 {data.tasks.map((t: any) => (
                   <tr key={t.id}>
                     <td>{t.poster_nickname}</td>
-                    <td>{t.type}</td>
+                    <td>{TASK_TYPE_LABELS[t.type] || t.type}</td>
                     <td style={{ maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{t.description}</td>
                     <td>¥{t.reward}</td>
                     <td><span style={{ ...styles.badge, backgroundColor: statusColor(t.status) }}>{statusLabel(t.status)}</span></td>
                     <td style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => setSelectedTask(t)} style={styles.detailBtn}>查看详情</button>
+                      <select
+                        value=""
+                        onChange={(e) => { if (e.target.value) handleTypeChange(t.id, e.target.value); }}
+                        style={styles.select}
+                      >
+                        <option value="">修改类型</option>
+                        <option value="full_time">全职</option>
+                        <option value="part_time">兼职</option>
+                        <option value="one_time">单次任务</option>
+                      </select>
                       <select
                         value=""
                         onChange={(e) => { if (e.target.value) handleStatusChange(t.id, e.target.value); }}
@@ -377,7 +619,7 @@ function Dashboard() {
                   <div style={styles.detailRow}><span style={styles.detailLabel}>任务 ID</span><span style={styles.detailValue}>{selectedTask.id}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>发布者</span><span style={styles.detailValue}>{selectedTask.poster_nickname} ({selectedTask.poster_email || '-'})</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>发布者 ID</span><span style={styles.detailValue}>{selectedTask.poster_id}</span></div>
-                  <div style={styles.detailRow}><span style={styles.detailLabel}>类型</span><span style={styles.detailValue}>{selectedTask.type}</span></div>
+                  <div style={styles.detailRow}><span style={styles.detailLabel}>类型</span><span style={styles.detailValue}>{TASK_TYPE_LABELS[selectedTask.type] || selectedTask.type}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>状态</span><span style={styles.detailValue}><span style={{ ...styles.badge, backgroundColor: statusColor(selectedTask.status) }}>{statusLabel(selectedTask.status)}</span></span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>描述</span><span style={styles.detailValue}>{selectedTask.description}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>地址</span><span style={styles.detailValue}>{selectedTask.location_address || '-'}</span></div>

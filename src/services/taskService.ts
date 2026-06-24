@@ -1,6 +1,7 @@
-import { Task, TaskStatus, CreateTaskPayload, UpdateTaskPayload } from '../types/task';
+import { Task, TaskStatus, CreateTaskPayload, UpdateTaskPayload, TaskTag } from '../types/task';
 import { NotFoundError, ConflictError, ValidationError } from '../utils/errors';
 import * as taskRepository from '../repositories/taskRepository';
+import * as taskTagRepository from '../repositories/taskTagRepository';
 import { getPresignedUrl } from './uploadService';
 
 /**
@@ -17,6 +18,18 @@ async function enrichTask(task: Task): Promise<Task> {
 
 async function enrichTasks(tasks: Task[]): Promise<Task[]> {
   return Promise.all(tasks.map(enrichTask));
+}
+
+/** Attach tags[] to each task (batch query). */
+async function attachTags(tasks: Task[]): Promise<Task[]> {
+  if (tasks.length === 0) return tasks;
+  const tagMap = await taskTagRepository.getForTasks(tasks.map((t) => t.id));
+  return tasks.map((t) => ({ ...t, tags: tagMap.get(t.id) ?? [] }));
+}
+
+/** List the task tag dictionary. */
+export async function listTaskTags(): Promise<TaskTag[]> {
+  return taskTagRepository.listAll();
 }
 
 /**
@@ -49,6 +62,7 @@ export interface ListTasksParams {
   sort?: string;
   page: number;
   pageSize: number;
+  tagIds?: string[];
 }
 
 export interface ListTasksResponse {
@@ -84,7 +98,7 @@ export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
     [userId]
   );
   const tasks = await enrichTasks(result.rows);
-  return { tasks };
+  return { tasks: await attachTags(tasks) };
 }
 
 /**
@@ -93,25 +107,25 @@ export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
  */
 export async function listAcceptedTasks(userId: string): Promise<{ tasks: Task[] }> {
   const tasks = await taskRepository.findAcceptedByUser(userId);
-  return { tasks: await enrichTasks(tasks) };
+  return { tasks: await attachTags(await enrichTasks(tasks)) };
 }
 
 /**
  * List nearby open tasks with filtering and pagination.
  */
 export async function listTasks(params: ListTasksParams): Promise<ListTasksResponse> {
-  const { lat, lng, radius, type, minReward, maxReward, sort, page, pageSize } = params;
+  const { lat, lng, radius, type, minReward, maxReward, sort, page, pageSize, tagIds } = params;
   const offset = (page - 1) * pageSize;
 
   const [tasks, totalCount] = await Promise.all([
-    taskRepository.findNearby({ lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset }),
-    taskRepository.countNearby({ lat, lng, radius, type, minReward, maxReward }),
+    taskRepository.findNearby({ lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset, tagIds }),
+    taskRepository.countNearby({ lat, lng, radius, type, minReward, maxReward, tagIds }),
   ]);
 
   const totalPages = Math.ceil(totalCount / pageSize);
 
   return {
-    tasks: await enrichTasks(tasks),
+    tasks: await attachTags(await enrichTasks(tasks)),
     page,
     totalPages,
     totalCount,
@@ -129,7 +143,8 @@ export async function getTask(taskId: string): Promise<Task> {
     throw new NotFoundError('任务不存在');
   }
 
-  return enrichTask(task);
+  const [enriched] = await attachTags([await enrichTask(task)]);
+  return enriched;
 }
 
 /**
@@ -147,7 +162,11 @@ export async function createTask(userId: string, payload: CreateTaskPayload): Pr
   }
 
   const task = await taskRepository.create(userId, payload);
-  return enrichTask(task);
+  if (payload.tagIds) {
+    await taskTagRepository.setForTask(task.id, payload.tagIds);
+  }
+  const [result] = await attachTags([await enrichTask(task)]);
+  return result;
 }
 
 /**
@@ -190,7 +209,12 @@ export async function updateTask(
     throw new NotFoundError('任务不存在或状态已变更');
   }
 
-  return enrichTask(updatedTask);
+  if (payload.tagIds !== undefined) {
+    await taskTagRepository.setForTask(taskId, payload.tagIds);
+  }
+
+  const [result] = await attachTags([await enrichTask(updatedTask)]);
+  return result;
 }
 
 /**

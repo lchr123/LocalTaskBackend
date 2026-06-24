@@ -217,6 +217,37 @@ router.patch('/tasks/:id/status', async (req: Request, res: Response, next: Next
 });
 
 /**
+ * PATCH /admin/tasks/:id/type
+ * Force update task type (admin override). Used to migrate legacy task types.
+ */
+router.patch('/tasks/:id/type', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { type } = req.body;
+
+    const validTypes = ['full_time', 'part_time', 'one_time'];
+    if (!type || !validTypes.includes(type)) {
+      res.status(422).json({ error: 'validation_error', message: '无效的类型值' });
+      return;
+    }
+
+    const result = await query(
+      `UPDATE tasks SET type = $1, updated_at = NOW() WHERE id = $2 RETURNING id, type`,
+      [type, id]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'not_found', message: '任务不存在' });
+      return;
+    }
+
+    res.status(200).json(result.rows[0]);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
  * GET /admin/reports
  * List all reports with pagination.
  */
@@ -544,6 +575,191 @@ router.get('/bans', async (req: Request, res: Response, next: NextFunction): Pro
       totalCount: parseInt(countResult.rows[0].count),
       totalPages: Math.ceil(parseInt(countResult.rows[0].count) / pageSize),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Tag dictionary management (task_tags & helper_tags) ─────────────────────
+
+/**
+ * Resolve the tag table + junction table from a `kind` query/body value.
+ * Uses an allowlist so the table name is never taken from raw user input.
+ */
+function resolveTagTables(kind: unknown): { tagTable: string; junction: string } | null {
+  if (kind === 'task') return { tagTable: 'task_tags', junction: 'task_task_tags' };
+  if (kind === 'helper') return { tagTable: 'helper_tags', junction: 'user_helper_tags' };
+  return null;
+}
+
+/**
+ * GET /admin/tags?kind=task|helper
+ * List the full tag dictionary with usage counts.
+ */
+router.get('/tags', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const tables = resolveTagTables(req.query.kind);
+    if (!tables) {
+      res.status(422).json({ error: 'validation_error', message: '无效的标签类型' });
+      return;
+    }
+    const result = await query(
+      `SELECT t.id, t.name, t.label_zh, t.category, t.created_at,
+              COUNT(j.tag_id)::int AS usage_count
+       FROM ${tables.tagTable} t
+       LEFT JOIN ${tables.junction} j ON j.tag_id = t.id
+       GROUP BY t.id
+       ORDER BY t.category NULLS LAST, t.label_zh`,
+      []
+    );
+    res.status(200).json({ tags: result.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /admin/tags?kind=task|helper
+ * Create a new tag. Body: { name, label_zh, category? }
+ */
+router.post('/tags', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const tables = resolveTagTables(req.query.kind);
+    if (!tables) {
+      res.status(422).json({ error: 'validation_error', message: '无效的标签类型' });
+      return;
+    }
+    const name = typeof req.body.name === 'string' ? req.body.name.trim() : '';
+    const labelZh = typeof req.body.label_zh === 'string' ? req.body.label_zh.trim() : '';
+    const category =
+      typeof req.body.category === 'string' && req.body.category.trim() !== ''
+        ? req.body.category.trim()
+        : null;
+
+    if (!name || name.length > 50) {
+      res.status(422).json({ error: 'validation_error', message: 'name 必填且不超过50字符' });
+      return;
+    }
+    if (!labelZh || labelZh.length > 50) {
+      res.status(422).json({ error: 'validation_error', message: 'label_zh 必填且不超过50字符' });
+      return;
+    }
+    if (category && category.length > 30) {
+      res.status(422).json({ error: 'validation_error', message: 'category 不超过30字符' });
+      return;
+    }
+
+    const result = await query(
+      `INSERT INTO ${tables.tagTable} (name, label_zh, category)
+       VALUES ($1, $2, $3)
+       RETURNING id, name, label_zh, category, created_at`,
+      [name, labelZh, category]
+    );
+    res.status(201).json(result.rows[0]);
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      res.status(409).json({ error: 'conflict', message: 'name 已存在' });
+      return;
+    }
+    next(err);
+  }
+});
+
+/**
+ * PATCH /admin/tags/:id?kind=task|helper
+ * Update a tag. Body: { name?, label_zh?, category? }
+ */
+router.patch('/tags/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const tables = resolveTagTables(req.query.kind);
+    if (!tables) {
+      res.status(422).json({ error: 'validation_error', message: '无效的标签类型' });
+      return;
+    }
+    const { id } = req.params;
+
+    const updates: string[] = [];
+    const params: unknown[] = [];
+    let idx = 1;
+
+    if (typeof req.body.name === 'string') {
+      const name = req.body.name.trim();
+      if (!name || name.length > 50) {
+        res.status(422).json({ error: 'validation_error', message: 'name 不合法' });
+        return;
+      }
+      updates.push(`name = $${idx++}`);
+      params.push(name);
+    }
+    if (typeof req.body.label_zh === 'string') {
+      const labelZh = req.body.label_zh.trim();
+      if (!labelZh || labelZh.length > 50) {
+        res.status(422).json({ error: 'validation_error', message: 'label_zh 不合法' });
+        return;
+      }
+      updates.push(`label_zh = $${idx++}`);
+      params.push(labelZh);
+    }
+    if ('category' in req.body) {
+      const category =
+        typeof req.body.category === 'string' && req.body.category.trim() !== ''
+          ? req.body.category.trim()
+          : null;
+      if (category && category.length > 30) {
+        res.status(422).json({ error: 'validation_error', message: 'category 不合法' });
+        return;
+      }
+      updates.push(`category = $${idx++}`);
+      params.push(category);
+    }
+
+    if (updates.length === 0) {
+      res.status(422).json({ error: 'validation_error', message: '没有需要更新的字段' });
+      return;
+    }
+
+    params.push(id);
+    const result = await query(
+      `UPDATE ${tables.tagTable} SET ${updates.join(', ')}
+       WHERE id = $${idx}
+       RETURNING id, name, label_zh, category, created_at`,
+      params
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'not_found', message: '标签不存在' });
+      return;
+    }
+    res.status(200).json(result.rows[0]);
+  } catch (err: any) {
+    if (err?.code === '23505') {
+      res.status(409).json({ error: 'conflict', message: 'name 已存在' });
+      return;
+    }
+    next(err);
+  }
+});
+
+/**
+ * DELETE /admin/tags/:id?kind=task|helper
+ * Delete a tag. Junction rows are removed automatically (ON DELETE CASCADE).
+ */
+router.delete('/tags/:id', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const tables = resolveTagTables(req.query.kind);
+    if (!tables) {
+      res.status(422).json({ error: 'validation_error', message: '无效的标签类型' });
+      return;
+    }
+    const { id } = req.params;
+    const result = await query(
+      `DELETE FROM ${tables.tagTable} WHERE id = $1 RETURNING id`,
+      [id]
+    );
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'not_found', message: '标签不存在' });
+      return;
+    }
+    res.status(200).json({ id: result.rows[0].id });
   } catch (err) {
     next(err);
   }

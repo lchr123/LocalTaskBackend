@@ -78,6 +78,8 @@ export const createTaskSchema = z.object({
   durationUnit: z.enum(['once', 'day', 'week', 'month']).nullish(),
 
   posterMemo: z.string().max(1000, '备注不能超过1000字符').nullish(),
+
+  tagIds: z.array(z.string()).max(20, '标签过多').optional(),
 });
 
 /**
@@ -149,6 +151,8 @@ export const taskQuerySchema = z.object({
   sort: z
     .enum(['distance', 'reward', 'newest', 'deadline'])
     .default('distance'),
+
+  tags: z.string().optional(),
 });
 
 /**

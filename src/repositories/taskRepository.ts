@@ -11,6 +11,8 @@ export interface FindNearbyParams {
   sort?: string;
   pageSize: number;
   offset: number;
+  /** Optional tag ids; a task matches if it has ANY of these tags. */
+  tagIds?: string[];
 }
 
 interface TaskRow {
@@ -101,7 +103,7 @@ function mapRowToTask(row: TaskRow): Task {
  * Supports filtering by type and reward range, ordered by distance.
  */
 export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
-  const { lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset } = params;
+  const { lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset, tagIds } = params;
 
   let orderBy = 'distance ASC';
   switch (sort) {
@@ -127,6 +129,9 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
       AND ($4::text[] IS NULL OR t.type = ANY($4::text[]))
       AND ($5::numeric IS NULL OR t.reward >= $5)
       AND ($6::numeric IS NULL OR t.reward <= $6)
+      AND ($9::uuid[] IS NULL OR EXISTS (
+        SELECT 1 FROM task_task_tags jt WHERE jt.task_id = t.id AND jt.tag_id = ANY($9::uuid[])
+      ))
     ORDER BY ${orderBy}
     LIMIT $7 OFFSET $8
   `;
@@ -140,6 +145,7 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
     maxReward ?? null,
     pageSize,
     offset,
+    tagIds && tagIds.length > 0 ? tagIds : null,
   ];
 
   const result = await query<TaskRow>(sql, values);
@@ -150,7 +156,7 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
  * Count nearby open tasks matching the same filters as findNearby.
  */
 export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'offset'>): Promise<number> {
-  const { lat, lng, radius, type, minReward, maxReward } = params;
+  const { lat, lng, radius, type, minReward, maxReward, tagIds } = params;
 
   const sql = `
     SELECT COUNT(*) AS count
@@ -160,6 +166,9 @@ export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'o
       AND ($4::text[] IS NULL OR t.type = ANY($4::text[]))
       AND ($5::numeric IS NULL OR t.reward >= $5)
       AND ($6::numeric IS NULL OR t.reward <= $6)
+      AND ($7::uuid[] IS NULL OR EXISTS (
+        SELECT 1 FROM task_task_tags jt WHERE jt.task_id = t.id AND jt.tag_id = ANY($7::uuid[])
+      ))
   `;
 
   const values = [
@@ -169,6 +178,7 @@ export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'o
     type ? type.split(',') : null,
     minReward ?? null,
     maxReward ?? null,
+    tagIds && tagIds.length > 0 ? tagIds : null,
   ];
 
   const result = await query<{ count: string }>(sql, values);

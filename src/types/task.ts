@@ -6,6 +6,14 @@ export type RewardUnit = 'once' | 'hour' | 'day' | 'month';
 /** Per-unit for the estimated duration (e.g. "2.5 小时/次"). */
 export type DurationUnit = 'once' | 'day' | 'week' | 'month';
 
+/** A task tag from the task_tags dictionary. */
+export interface TaskTag {
+  id: string;
+  name: string;
+  label_zh: string;
+  category: string | null;
+}
+
 export interface Task {
   id: string;
   posterId: string;
@@ -44,6 +52,8 @@ export interface Task {
    * (e.g. GET /tasks/mine). Never exposed on public endpoints.
    */
   posterMemo?: string | null;
+  /** Task tags (many-to-many). */
+  tags?: TaskTag[];
 }
 
 export interface CreateTaskPayload {
@@ -64,6 +74,8 @@ export interface CreateTaskPayload {
   durationHours?: number | null;
   durationUnit?: DurationUnit | null;
   posterMemo?: string | null;
+  /** Tag ids to associate with the task. */
+  tagIds?: string[];
 }
 
 export interface UpdateTaskPayload {
@@ -78,4 +90,6 @@ export interface UpdateTaskPayload {
   contactMethod?: string | null;
   durationHours?: number | null;
   durationUnit?: DurationUnit | null;
+  /** Tag ids to associate with the task (replaces existing set). */
+  tagIds?: string[];
 }

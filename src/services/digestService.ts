@@ -14,13 +14,9 @@ import { logger } from '../utils/logger';
 const JST_OFFSET_MS = 9 * 60 * 60 * 1000;
 
 const TASK_TYPE_LABELS: Record<string, string> = {
-  delivery: '配送/跑腿',
-  pet_care: '宠物照护',
-  translation: '翻译',
-  moving: '搬家',
-  airport_transfer: '接送机',
-  childcare: '育儿照护',
-  other: '其他',
+  full_time: '全职',
+  part_time: '兼职',
+  one_time: '单次任务',
 };
 
 const REWARD_UNIT_LABELS: Record<string, string> = { once: '次', hour: '小时', day: '日', month: '月' };
