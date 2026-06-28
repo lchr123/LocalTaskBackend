@@ -78,7 +78,7 @@ router.get('/users', async (req: Request, res: Response, next: NextFunction): Pr
     const [usersResult, countResult] = await Promise.all([
       query(
         `SELECT id, cognito_sub, email, phone, nickname, avatar_url, average_rating,
-                birthday, gender, address, bio,
+                birthday, gender, address, bio, email_opt_in,
                 (SELECT COUNT(*) FROM tasks t WHERE t.selected_helper_id = u.id AND t.status = 'completed')::int AS completed_task_count,
                 created_at, updated_at
          FROM users u ${whereStr} ORDER BY created_at DESC LIMIT $1 OFFSET $2`,
@@ -524,6 +524,39 @@ router.get('/users/:id/bans', async (req: Request, res: Response, next: NextFunc
     );
 
     res.status(200).json({ bans: result.rows });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * PATCH /admin/users/:id/email-opt-in
+ * Update a user's marketing email opt-in flag (weekly digest subscription).
+ * Body: { emailOptIn: boolean }
+ */
+router.patch('/users/:id/email-opt-in', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const { emailOptIn } = req.body;
+
+    if (typeof emailOptIn !== 'boolean') {
+      res.status(422).json({ error: 'validation_error', message: 'emailOptIn 必须为布尔值' });
+      return;
+    }
+
+    const result = await query(
+      `UPDATE users SET email_opt_in = $1, updated_at = NOW()
+       WHERE id = $2
+       RETURNING id, email_opt_in`,
+      [emailOptIn, id]
+    );
+
+    if (result.rows.length === 0) {
+      res.status(404).json({ error: 'not_found', message: '用户不存在' });
+      return;
+    }
+
+    res.status(200).json(result.rows[0]);
   } catch (err) {
     next(err);
   }

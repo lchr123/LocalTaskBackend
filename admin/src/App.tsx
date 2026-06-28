@@ -443,11 +443,30 @@ function Dashboard() {
     }
   };
 
+  const handleToggleEmailOptIn = async (u: any) => {
+    const next = !u.email_opt_in;
+    if (!confirm(`确定将「${u.nickname || u.cognito_sub || '该用户'}」的邮件订阅设为${next ? '开启' : '关闭'}？`)) return;
+    try {
+      const res = await apiRequest(`/users/${u.id}/email-opt-in`, {
+        method: 'PATCH',
+        body: JSON.stringify({ emailOptIn: next }),
+      });
+      if (res?.error) {
+        alert(res.message || '操作失败');
+        return;
+      }
+      // Keep the open detail modal in sync if it shows this user.
+      setSelectedUser((prev: any) => (prev && prev.id === u.id ? { ...prev, email_opt_in: next } : prev));
+      loadData();
+    } catch {
+      alert('操作失败');
+    }
+  };
+
   const handleLogout = () => {
     clearToken();
     window.location.reload();
   };
-
   return (
     <div style={styles.dashboard}>
       <header style={styles.header}>
@@ -541,7 +560,7 @@ function Dashboard() {
             <table style={styles.table}>
               <thead>
                 <tr>
-                  <th>Cognito Sub</th><th>昵称</th><th>邮箱</th><th>手机</th><th>注册时间</th><th>操作</th>
+                  <th>Cognito Sub</th><th>昵称</th><th>邮箱</th><th>手机</th><th>邮件订阅</th><th>注册时间</th><th>操作</th>
                 </tr>
               </thead>
               <tbody>
@@ -551,9 +570,17 @@ function Dashboard() {
                     <td>{u.nickname || '-'}</td>
                     <td>{u.email || '-'}</td>
                     <td>{u.phone || '-'}</td>
+                    <td>
+                      <span style={{ ...styles.badge, backgroundColor: u.email_opt_in ? '#4caf50' : '#9e9e9e' }}>
+                        {u.email_opt_in ? '订阅中' : '已退订'}
+                      </span>
+                    </td>
                     <td>{new Date(u.created_at).toLocaleString('ja-JP', { hour12: false })}</td>
                     <td style={{ display: 'flex', gap: 6 }}>
                       <button onClick={() => setSelectedUser(u)} style={styles.detailBtn}>查看详细</button>
+                      <button onClick={() => handleToggleEmailOptIn(u)} style={styles.detailBtn}>
+                        {u.email_opt_in ? '关闭订阅' : '开启订阅'}
+                      </button>
                       <button onClick={() => setBanDialogUser(u)} style={{ ...styles.detailBtn, borderColor: '#f44336', color: '#f44336' }}>封禁</button>
                     </td>
                   </tr>
@@ -815,6 +842,17 @@ function Dashboard() {
                   <div style={styles.detailRow}><span style={styles.detailLabel}>自我介绍</span><span style={styles.detailValue}>{selectedUser.bio || '-'}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>评分</span><span style={styles.detailValue}>⭐ {selectedUser.average_rating ?? '-'}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>完成任务</span><span style={styles.detailValue}>{selectedUser.completed_task_count ?? 0} 个</span></div>
+                  <div style={styles.detailRow}>
+                    <span style={styles.detailLabel}>邮件订阅</span>
+                    <span style={{ ...styles.detailValue, display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ ...styles.badge, backgroundColor: selectedUser.email_opt_in ? '#4caf50' : '#9e9e9e' }}>
+                        {selectedUser.email_opt_in ? '订阅中' : '已退订'}
+                      </span>
+                      <button onClick={() => handleToggleEmailOptIn(selectedUser)} style={styles.detailBtn}>
+                        {selectedUser.email_opt_in ? '关闭订阅' : '开启订阅'}
+                      </button>
+                    </span>
+                  </div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>注册时间</span><span style={styles.detailValue}>{new Date(selectedUser.created_at).toLocaleString('ja-JP', { hour12: false })}</span></div>
                   <div style={styles.detailRow}><span style={styles.detailLabel}>更新时间</span><span style={styles.detailValue}>{selectedUser.updated_at ? new Date(selectedUser.updated_at).toLocaleString('ja-JP', { hour12: false }) : '-'}</span></div>
                 </div>
