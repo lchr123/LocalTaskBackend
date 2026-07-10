@@ -193,11 +193,11 @@ async function getUnreadSessionPreviews(userId: string): Promise<UnreadSessionPr
  * + counterpart has unread messages, WITHOUT including message text.
  */
 function renderUnreadReminderHtml(params: {
-  unreadTotal: number;
+  sessionCount: number;
   sessions: UnreadSessionPreview[];
   unsubscribeToken: string;
 }): string {
-  const { unreadTotal, sessions, unsubscribeToken } = params;
+  const { sessionCount, sessions, unsubscribeToken } = params;
   const unsubUrl = `${config.digest.apiUrl}/unsubscribe?token=${encodeURIComponent(unsubscribeToken)}`;
   const messagesUrl = `${config.digest.appUrl}/messages`;
 
@@ -221,7 +221,7 @@ function renderUnreadReminderHtml(params: {
   <div style="font-family:-apple-system,Helvetica,Arial,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#333;">
     <h2 style="color:#1976D2;margin:0 0 2px;">LocallyHelper</h2>
     <p style="font-size:15px;line-height:1.6;">
-      你有 <strong style="color:#E65100;">${unreadTotal}</strong> 条未读消息，以下任务有新消息等你查看：
+      你有 <strong style="color:#E65100;">${sessionCount}</strong> 个聊天有未读消息，以下任务有新消息等你查看：
     </p>
     <table style="width:100%;border-collapse:collapse;">${items}</table>
     <p style="margin-top:24px;">
@@ -282,7 +282,7 @@ export async function runUnreadReminders(options: RunUnreadRemindersOptions = {}
       return { dryRun: true, candidateCount: 1 };
     }
     const html = renderUnreadReminderHtml({
-      unreadTotal: 1,
+      sessionCount: 1,
       sessions: [{ taskTitle: '测试任务', participantNickname: '测试用户', unreadCount: 1 }],
       unsubscribeToken: makeUnsubscribeToken('test-user'),
     });
@@ -324,11 +324,11 @@ export async function runUnreadReminders(options: RunUnreadRemindersOptions = {}
     try {
       const sessions = await getUnreadSessionPreviews(candidate.id);
       const html = renderUnreadReminderHtml({
-        unreadTotal: candidate.unreadTotal,
+        sessionCount: candidate.unreadSessions,
         sessions,
         unsubscribeToken: makeUnsubscribeToken(candidate.id),
       });
-      const subject = `LocallyHelper · 你有 ${candidate.unreadTotal} 条未读消息`;
+      const subject = `LocallyHelper · 你有 ${candidate.unreadSessions} 个聊天有未读消息`;
       const ok = await sendResendBatch([
         { from: config.resend.fromEmail, to: candidate.email, subject, html },
       ]);
