@@ -1,5 +1,11 @@
 export type TaskType = string;
 export type TaskStatus = 'open' | 'in_progress' | 'completed' | 'cancelled';
+/**
+ * Which domain this record belongs to. Both domains share this table and its
+ * entire API (intents, chat, reviews, reports) — kind is a discriminator, not
+ * a separate subsystem. 'task' = 周边任务/工作, 'marketplace' = 二手市场.
+ */
+export type TaskKind = 'task' | 'marketplace';
 
 /** Billing unit for the reward amount. */
 export type RewardUnit = 'once' | 'hour' | 'day' | 'month';
@@ -19,6 +25,7 @@ export interface Task {
   posterId: string;
   posterNickname: string;
   posterRating: number;
+  kind: TaskKind;
   type: TaskType;
   description: string;
   location: {
@@ -57,6 +64,8 @@ export interface Task {
 }
 
 export interface CreateTaskPayload {
+  /** Defaults to 'task' when omitted (backward compatible). */
+  kind?: TaskKind;
   type: TaskType;
   description: string;
   location: {

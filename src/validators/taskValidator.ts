@@ -13,6 +13,9 @@ import { z } from 'zod';
  * Validates: Requirements 2.6, 2.7
  */
 export const createTaskSchema = z.object({
+  // Domain discriminator: 'task' (周边任务/工作, default) or 'marketplace' (二手市场).
+  kind: z.enum(['task', 'marketplace']).default('task'),
+
   type: z.string({ error: 'タスクタイプは必須です' }).min(1, 'タスクタイプは必須です'),
 
   description: z
@@ -100,6 +103,9 @@ export const createTaskSchema = z.object({
  * Validates: Requirements 2.6, 2.7
  */
 export const taskQuerySchema = z.object({
+  // Domain discriminator: 'task' (周边任务/工作, default) or 'marketplace' (二手市场).
+  kind: z.enum(['task', 'marketplace']).default('task'),
+
   lat: z
     .coerce
     .number({ error: '緯度(lat)は必須の数値パラメータです' })

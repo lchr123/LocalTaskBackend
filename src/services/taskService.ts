@@ -53,6 +53,7 @@ const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
 };
 
 export interface ListTasksParams {
+  kind: 'task' | 'marketplace';
   lat: number;
   lng: number;
   radius: number;
@@ -78,7 +79,7 @@ export interface ListTasksResponse {
 export async function listMyTasks(userId: string): Promise<{ tasks: Task[] }> {
   const { query: dbQuery } = await import('../config/database');
   const result = await dbQuery<Task>(
-    `SELECT t.id, t.poster_id AS "posterId", t.type, t.description,
+    `SELECT t.id, t.poster_id AS "posterId", t.kind, t.type, t.description,
             t.location_address AS "locationAddress",
             ST_Y(t.location::geometry) AS "latitude",
             ST_X(t.location::geometry) AS "longitude",
@@ -114,12 +115,12 @@ export async function listAcceptedTasks(userId: string): Promise<{ tasks: Task[]
  * List nearby open tasks with filtering and pagination.
  */
 export async function listTasks(params: ListTasksParams): Promise<ListTasksResponse> {
-  const { lat, lng, radius, type, minReward, maxReward, sort, page, pageSize, tagIds } = params;
+  const { kind, lat, lng, radius, type, minReward, maxReward, sort, page, pageSize, tagIds } = params;
   const offset = (page - 1) * pageSize;
 
   const [tasks, totalCount] = await Promise.all([
-    taskRepository.findNearby({ lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset, tagIds }),
-    taskRepository.countNearby({ lat, lng, radius, type, minReward, maxReward, tagIds }),
+    taskRepository.findNearby({ kind, lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset, tagIds }),
+    taskRepository.countNearby({ kind, lat, lng, radius, type, minReward, maxReward, tagIds }),
   ]);
 
   const totalPages = Math.ceil(totalCount / pageSize);

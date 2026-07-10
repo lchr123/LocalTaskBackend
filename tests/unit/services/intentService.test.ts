@@ -27,6 +27,7 @@ const mockTask: Task = {
   posterId: 'poster-001',
   posterNickname: 'テストユーザー',
   posterRating: 4.5,
+  kind: 'task',
   type: 'delivery',
   description: 'テスト用のタスクです。配達をお願いします。',
   location: {
@@ -39,6 +40,8 @@ const mockTask: Task = {
   status: 'open',
   intentCount: 2,
   createdAt: '2024-01-01T00:00:00.000Z',
+  images: [],
+  headcount: 1,
 };
 
 const mockIntent: Intent = {

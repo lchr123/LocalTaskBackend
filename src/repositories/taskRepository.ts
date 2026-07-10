@@ -2,6 +2,7 @@ import { query } from '../config/database';
 import { Task, TaskStatus, CreateTaskPayload, UpdateTaskPayload } from '../types/task';
 
 export interface FindNearbyParams {
+  kind: 'task' | 'marketplace';
   lat: number;
   lng: number;
   radius: number;
@@ -20,6 +21,7 @@ interface TaskRow {
   poster_id: string;
   nickname: string;
   average_rating: string;
+  kind: string;
   type: string;
   description: string;
   location_address: string;
@@ -48,13 +50,13 @@ interface TaskRow {
  * where appropriate.
  */
 const TASK_EXTRA_SELECT = `
-  t.reward_unit, t.images, t.headcount, t.start_time,
+  t.kind, t.reward_unit, t.images, t.headcount, t.start_time,
   t.contact_method, t.duration_hours, t.duration_unit
 `;
 
 /** Same extra columns for RETURNING clauses (no table prefix). */
 const TASK_EXTRA_RETURNING = `
-  reward_unit, images, headcount, start_time,
+  kind, reward_unit, images, headcount, start_time,
   contact_method, duration_hours, duration_unit
 `;
 
@@ -68,6 +70,7 @@ function mapRowToTask(row: TaskRow): Task {
     posterId: row.poster_id,
     posterNickname: row.nickname,
     posterRating: parseFloat(row.average_rating),
+    kind: (row.kind as Task['kind']) || 'task',
     type: row.type as Task['type'],
     description: row.description,
     location: {
@@ -103,7 +106,7 @@ function mapRowToTask(row: TaskRow): Task {
  * Supports filtering by type and reward range, ordered by distance.
  */
 export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
-  const { lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset, tagIds } = params;
+  const { kind, lat, lng, radius, type, minReward, maxReward, sort, pageSize, offset, tagIds } = params;
 
   let orderBy = 'distance ASC';
   switch (sort) {
@@ -125,6 +128,7 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
     FROM tasks t
     JOIN users u ON t.poster_id = u.id
     WHERE t.status = 'open'
+      AND t.kind = $10
       AND ST_DWithin(t.location, ST_SetSRID(ST_MakePoint($1, $2), 4326), $3 * 1000)
       AND ($4::text[] IS NULL OR t.type = ANY($4::text[]))
       AND ($5::numeric IS NULL OR t.reward >= $5)
@@ -146,6 +150,7 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
     pageSize,
     offset,
     tagIds && tagIds.length > 0 ? tagIds : null,
+    kind,
   ];
 
   const result = await query<TaskRow>(sql, values);
@@ -156,12 +161,13 @@ export async function findNearby(params: FindNearbyParams): Promise<Task[]> {
  * Count nearby open tasks matching the same filters as findNearby.
  */
 export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'offset'>): Promise<number> {
-  const { lat, lng, radius, type, minReward, maxReward, tagIds } = params;
+  const { kind, lat, lng, radius, type, minReward, maxReward, tagIds } = params;
 
   const sql = `
     SELECT COUNT(*) AS count
     FROM tasks t
     WHERE t.status = 'open'
+      AND t.kind = $8
       AND ST_DWithin(t.location, ST_SetSRID(ST_MakePoint($1, $2), 4326), $3 * 1000)
       AND ($4::text[] IS NULL OR t.type = ANY($4::text[]))
       AND ($5::numeric IS NULL OR t.reward >= $5)
@@ -179,6 +185,7 @@ export async function countNearby(params: Omit<FindNearbyParams, 'pageSize' | 'o
     minReward ?? null,
     maxReward ?? null,
     tagIds && tagIds.length > 0 ? tagIds : null,
+    kind,
   ];
 
   const result = await query<{ count: string }>(sql, values);
@@ -216,14 +223,14 @@ export async function findById(taskId: string): Promise<Task | null> {
 export async function create(userId: string, payload: CreateTaskPayload): Promise<Task> {
   const sql = `
     INSERT INTO tasks (
-      poster_id, type, description, location_address, location,
+      poster_id, kind, type, description, location_address, location,
       reward, reward_unit, deadline, images, headcount,
       start_time, contact_method, duration_hours, duration_unit, poster_memo
     )
     VALUES (
-      $1, $2, $3, $4, ST_SetSRID(ST_MakePoint($5, $6), 4326),
-      $7, $8, $9, $10, $11,
-      $12, $13, $14, $15, $16
+      $1, $2, $3, $4, $5, ST_SetSRID(ST_MakePoint($6, $7), 4326),
+      $8, $9, $10, $11, $12,
+      $13, $14, $15, $16, $17
     )
     RETURNING id, poster_id, type, description, location_address,
               ST_X(location::geometry) AS lng,
@@ -235,21 +242,22 @@ export async function create(userId: string, payload: CreateTaskPayload): Promis
 
   const values = [
     userId,                          // $1
-    payload.type,                    // $2
-    payload.description,             // $3
-    payload.location.address,        // $4
-    payload.location.longitude,      // $5
-    payload.location.latitude,       // $6
-    payload.reward,                  // $7
-    payload.rewardUnit ?? null,      // $8
-    payload.deadline,                // $9
-    payload.images ?? [],            // $10 (pg maps JS array -> text[])
-    payload.headcount ?? 1,          // $11
-    payload.startTime ?? null,       // $12
-    payload.contactMethod ?? null,   // $13
-    payload.durationHours ?? null,   // $14
-    payload.durationUnit ?? null,    // $15
-    payload.posterMemo ?? null,      // $16
+    payload.kind ?? 'task',          // $2
+    payload.type,                    // $3
+    payload.description,             // $4
+    payload.location.address,        // $5
+    payload.location.longitude,      // $6
+    payload.location.latitude,       // $7
+    payload.reward,                  // $8
+    payload.rewardUnit ?? null,      // $9
+    payload.deadline,                // $10
+    payload.images ?? [],            // $11 (pg maps JS array -> text[])
+    payload.headcount ?? 1,          // $12
+    payload.startTime ?? null,       // $13
+    payload.contactMethod ?? null,   // $14
+    payload.durationHours ?? null,   // $15
+    payload.durationUnit ?? null,    // $16
+    payload.posterMemo ?? null,      // $17
   ];
 
   const result = await query<TaskRow>(sql, values);

@@ -1,17 +1,24 @@
 import { listTasks, getTask, createTask, updateTaskStatus } from '../../../src/services/taskService';
 import * as taskRepository from '../../../src/repositories/taskRepository';
+import * as taskTagRepository from '../../../src/repositories/taskTagRepository';
 import { NotFoundError, ConflictError, ValidationError } from '../../../src/utils/errors';
 import { Task, TaskStatus } from '../../../src/types/task';
 
 jest.mock('../../../src/repositories/taskRepository');
+jest.mock('../../../src/repositories/taskTagRepository');
+jest.mock('../../../src/services/uploadService', () => ({
+  getPresignedUrl: jest.fn((url: string) => Promise.resolve(url)),
+}));
 
 const mockedRepo = taskRepository as jest.Mocked<typeof taskRepository>;
+const mockedTagRepo = taskTagRepository as jest.Mocked<typeof taskTagRepository>;
 
 const mockTask: Task = {
   id: '123e4567-e89b-12d3-a456-426614174000',
   posterId: 'user-001',
   posterNickname: 'テストユーザー',
   posterRating: 4.5,
+  kind: 'task',
   type: 'delivery',
   description: 'テスト用のタスクです。配達をお願いします。',
   location: {
@@ -24,12 +31,16 @@ const mockTask: Task = {
   status: 'open',
   intentCount: 3,
   createdAt: '2024-01-01T00:00:00.000Z',
+  images: [],
+  headcount: 1,
   distance: 1.25,
 };
 
 describe('taskService', () => {
   beforeEach(() => {
     jest.clearAllMocks();
+    // No tags attached by default; individual tests can override.
+    mockedTagRepo.getForTasks.mockResolvedValue(new Map());
   });
 
   describe('listTasks', () => {
@@ -38,6 +49,7 @@ describe('taskService', () => {
       mockedRepo.countNearby.mockResolvedValue(25);
 
       const result = await listTasks({
+        kind: 'task',
         lat: 35.68,
         lng: 139.76,
         radius: 10,
@@ -46,7 +58,7 @@ describe('taskService', () => {
       });
 
       expect(result.tasks).toHaveLength(1);
-      expect(result.tasks[0]).toEqual(mockTask);
+      expect(result.tasks[0]).toEqual({ ...mockTask, tags: [] });
       expect(result.page).toBe(1);
       expect(result.totalCount).toBe(25);
       expect(result.totalPages).toBe(2); // ceil(25/20) = 2
@@ -57,6 +69,7 @@ describe('taskService', () => {
       mockedRepo.countNearby.mockResolvedValue(50);
 
       const result = await listTasks({
+        kind: 'task',
         lat: 35.68,
         lng: 139.76,
         radius: 10,
@@ -73,6 +86,7 @@ describe('taskService', () => {
       mockedRepo.countNearby.mockResolvedValue(0);
 
       const result = await listTasks({
+        kind: 'task',
         lat: 35.68,
         lng: 139.76,
         radius: 10,
@@ -90,6 +104,7 @@ describe('taskService', () => {
       mockedRepo.countNearby.mockResolvedValue(0);
 
       await listTasks({
+        kind: 'task',
         lat: 35.68,
         lng: 139.76,
         radius: 5,
@@ -101,23 +116,28 @@ describe('taskService', () => {
       });
 
       expect(mockedRepo.findNearby).toHaveBeenCalledWith({
+        kind: 'task',
         lat: 35.68,
         lng: 139.76,
         radius: 5,
         type: 'shopping',
         minReward: 500,
         maxReward: 3000,
+        tagIds: undefined,
+        sort: undefined,
         pageSize: 10,
         offset: 10, // (page-1) * pageSize = (2-1)*10
       });
 
       expect(mockedRepo.countNearby).toHaveBeenCalledWith({
+        kind: 'task',
         lat: 35.68,
         lng: 139.76,
         radius: 5,
         type: 'shopping',
         minReward: 500,
         maxReward: 3000,
+        tagIds: undefined,
       });
     });
   });
@@ -128,7 +148,7 @@ describe('taskService', () => {
 
       const result = await getTask('123e4567-e89b-12d3-a456-426614174000');
 
-      expect(result).toEqual(mockTask);
+      expect(result).toEqual({ ...mockTask, tags: [] });
       expect(mockedRepo.findById).toHaveBeenCalledWith('123e4567-e89b-12d3-a456-426614174000');
     });
 
@@ -157,7 +177,7 @@ describe('taskService', () => {
 
       const result = await createTask('user-001', validPayload);
 
-      expect(result).toEqual(mockTask);
+      expect(result).toEqual({ ...mockTask, tags: [] });
       expect(mockedRepo.create).toHaveBeenCalledWith('user-001', validPayload);
     });
 
