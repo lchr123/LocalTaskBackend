@@ -36,22 +36,36 @@ export interface RunDigestOptions {
   testEmail?: string;
 }
 
+/** Number of daily buckets recipients are spread across (one per weekday). */
+export const DIGEST_BUCKETS = 7;
+
 /**
- * Reporting window = the previous Monday 00:00 JST .. this Monday 00:00 JST.
- * Returns UTC Date bounds plus the JST week-start label (YYYY-MM-DD) used as
- * the idempotency key.
+ * Rolling reporting window relative to the send day: the trailing 7 days ending
+ * at 00:00 JST of the run day. e.g. a Tuesday run covers
+ * [last Tuesday 00:00 JST, this Tuesday 00:00 JST).
+ *
+ * `runDate` (the JST calendar date of the run) is used as the per-day
+ * idempotency key so the daily job is safe against double triggers.
  */
-export function getReportingWeek(now = new Date()): { start: Date; end: Date; weekStart: string } {
+export function getRollingWindow(now = new Date()): { start: Date; end: Date; runDate: string } {
   const jst = new Date(now.getTime() + JST_OFFSET_MS);
-  const dow = jst.getUTCDay(); // 0=Sun..6=Sat on the JST clock
-  const daysSinceMonday = (dow + 6) % 7;
-  const thisMondayMidnightUtc =
-    Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate() - daysSinceMonday) - JST_OFFSET_MS;
-  const end = new Date(thisMondayMidnightUtc);
-  const start = new Date(thisMondayMidnightUtc - 7 * 24 * 60 * 60 * 1000);
-  const startJst = new Date(start.getTime() + JST_OFFSET_MS);
-  const weekStart = startJst.toISOString().slice(0, 10);
-  return { start, end, weekStart };
+  // 00:00 JST of the run day, expressed back in UTC.
+  const endUtc = Date.UTC(jst.getUTCFullYear(), jst.getUTCMonth(), jst.getUTCDate()) - JST_OFFSET_MS;
+  const end = new Date(endUtc);
+  const start = new Date(endUtc - 7 * 24 * 60 * 60 * 1000);
+  const runDate = new Date(end.getTime() + JST_OFFSET_MS).toISOString().slice(0, 10);
+  return { start, end, runDate };
+}
+
+/**
+ * Today's recipient bucket (0..6), derived from the JST weekday of the run day.
+ * Each user is deterministically assigned to a bucket via md5(user_id) % 7, so
+ * exactly ~1/7 of opted-in users are emailed each day and every user receives
+ * the digest once per week on a stable weekday.
+ */
+export function getTodaysBucket(now = new Date()): number {
+  const jst = new Date(now.getTime() + JST_OFFSET_MS);
+  return jst.getUTCDay(); // 0=Sun..6=Sat on the JST clock
 }
 
 /** Build an HMAC-signed unsubscribe token: `${userId}.${sig}`. */
@@ -164,12 +178,21 @@ async function sendResendBatch(
 }
 
 /**
- * Run the weekly digest. Idempotent per ISO week unless dryRun/testEmail.
+ * Run the daily slice of the digest.
+ *
+ * Recipients are spread across 7 daily buckets (md5(user_id) % 7). Each run
+ * emails only today's bucket, and the content window is the trailing 7 days
+ * ending at 00:00 JST of the run day, so every recipient gets exactly their
+ * own "past week" relative to their send day.
+ *
+ * Idempotent per run day (weekly_digest_runs.week_start stores the run date)
+ * unless dryRun/testEmail.
  */
 export async function runWeeklyDigest(options: RunDigestOptions = {}): Promise<{
   skipped?: boolean;
   dryRun?: boolean;
-  weekStart: string;
+  runDate: string;
+  bucket: number;
   newTaskCount: number;
   highlightCount: number;
   recipientCount: number;
@@ -180,19 +203,20 @@ export async function runWeeklyDigest(options: RunDigestOptions = {}): Promise<{
     throw new Error('RESEND_API_KEY is not configured');
   }
 
-  const { start, end, weekStart } = getReportingWeek();
+  const { start, end, runDate } = getRollingWindow();
+  const bucket = getTodaysBucket();
   const isRealRun = !options.dryRun && !options.testEmail;
 
-  // Idempotency: reserve this week first
+  // Idempotency: reserve this run day first (prevents double sends on retrigger)
   if (isRealRun) {
     const reserve = await query(
       `INSERT INTO weekly_digest_runs (week_start, status) VALUES ($1, 'running')
        ON CONFLICT (week_start) DO NOTHING RETURNING id`,
-      [weekStart]
+      [runDate]
     );
     if (reserve.rows.length === 0) {
-      logger.info('Weekly digest already processed for week', { weekStart });
-      return { skipped: true, weekStart, newTaskCount: 0, highlightCount: 0, recipientCount: 0 };
+      logger.info('Digest already processed for run date', { runDate });
+      return { skipped: true, runDate, bucket, newTaskCount: 0, highlightCount: 0, recipientCount: 0 };
     }
   }
 
@@ -215,15 +239,17 @@ export async function runWeeklyDigest(options: RunDigestOptions = {}): Promise<{
   );
   const highlights = highlightsRes.rows;
 
-  // Recipients
+  // Recipients — only today's bucket (md5(id) % 7 == bucket), so the list is
+  // spread evenly across the week and never exceeds ~1/7 of all opted-in users.
   let recipients: { id: string; email: string }[];
   if (options.testEmail) {
     recipients = [{ id: 'test-user', email: options.testEmail }];
   } else {
     const r = await query<{ id: string; email: string }>(
       `SELECT id, email FROM users
-       WHERE email_opt_in = true AND email IS NOT NULL AND email <> ''`,
-      []
+       WHERE email_opt_in = true AND email IS NOT NULL AND email <> ''
+         AND (get_byte(decode(md5(id::text), 'hex'), 0) % $1) = $2`,
+      [DIGEST_BUCKETS, bucket]
     );
     recipients = r.rows;
   }
@@ -231,14 +257,15 @@ export async function runWeeklyDigest(options: RunDigestOptions = {}): Promise<{
   if (options.dryRun) {
     return {
       dryRun: true,
-      weekStart,
+      runDate,
+      bucket,
       newTaskCount,
       highlightCount: highlights.length,
       recipientCount: recipients.length,
     };
   }
 
-  const subject = `LocallyHelper 互助任务周报 · 上周新增 ${newTaskCount} 个可接任务`;
+  const subject = `LocallyHelper 互助任务周报 · 近一周新增 ${newTaskCount} 个可接任务`;
 
   // Send in batches of 100
   let sent = 0;
@@ -272,14 +299,15 @@ export async function runWeeklyDigest(options: RunDigestOptions = {}): Promise<{
        SET recipient_count = $2, sent_count = $3, failed_count = $4,
            new_task_count = $5, status = 'completed'
        WHERE week_start = $1`,
-      [weekStart, recipients.length, sent, failed, newTaskCount]
+      [runDate, recipients.length, sent, failed, newTaskCount]
     );
   }
 
-  logger.info('Weekly digest sent', { weekStart, newTaskCount, recipients: recipients.length, sent, failed });
+  logger.info('Digest sent', { runDate, bucket, newTaskCount, recipients: recipients.length, sent, failed });
 
   return {
-    weekStart,
+    runDate,
+    bucket,
     newTaskCount,
     highlightCount: highlights.length,
     recipientCount: recipients.length,

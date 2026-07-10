@@ -2,8 +2,11 @@ name: Weekly Digest
 
 on:
   schedule:
-    # 03:00 UTC every Friday = 12:00 JST Friday
-    - cron: '0 3 * * 5'
+    # 03:00 UTC every day = 12:00 JST daily.
+    # Recipients are split into 7 md5(user_id)%7 buckets; each daily run emails
+    # one bucket, spreading the weekly digest evenly across the week to stay
+    # under the provider's per-day quota.
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       dryRun:
