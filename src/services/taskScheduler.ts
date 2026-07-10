@@ -11,13 +11,16 @@ import { query } from '../config/database';
 import { logger } from '../utils/logger';
 import { config } from '../config';
 import { listObjectsByPrefix, deleteObjects, extractKeyFromUrl } from './uploadService';
+import { runUnreadReminders } from './notificationEmailService';
 
 const SCAN_INTERVAL_MS = 15 * 60 * 1000; // 15 minutes
 const IMAGE_CLEANUP_INTERVAL_MS = 12 * 60 * 60 * 1000; // 12 hours
 const IMAGE_GRACE_MS = 24 * 60 * 60 * 1000; // protect uploads newer than 24h
+const UNREAD_REMINDER_INTERVAL_MS = 30 * 60 * 1000; // 30 minutes
 
 let intervalId: ReturnType<typeof setInterval> | null = null;
 let imageCleanupIntervalId: ReturnType<typeof setInterval> | null = null;
+let unreadReminderIntervalId: ReturnType<typeof setInterval> | null = null;
 
 /**
  * Cancel all tasks whose deadline has passed and are still open or in_progress.
@@ -116,6 +119,24 @@ async function cleanupOrphanTaskImages(): Promise<void> {
 }
 
 /**
+ * Scan for users with stale unread chat messages and send reminder emails.
+ * Safe to run this often: runUnreadReminders enforces at most one email per
+ * user per 24h at the database level (see notificationEmailService).
+ */
+async function sendUnreadReminders(): Promise<void> {
+  try {
+    const result = await runUnreadReminders();
+    if (result.candidateCount > 0) {
+      logger.info('Unread reminder scan (scheduler)', result);
+    }
+  } catch (err) {
+    logger.error('Unread reminder scan failed', {
+      error: err instanceof Error ? err.message : 'Unknown error',
+    });
+  }
+}
+
+/**
  * Start the task scheduler. Runs immediately once, then every 15 minutes.
  */
 export function startTaskScheduler(): void {
@@ -128,6 +149,9 @@ export function startTaskScheduler(): void {
   intervalId = setInterval(cancelExpiredTasks, SCAN_INTERVAL_MS);
   // Orphan image cleanup every 12 hours (not run on startup)
   imageCleanupIntervalId = setInterval(cleanupOrphanTaskImages, IMAGE_CLEANUP_INTERVAL_MS);
+  // Unread chat reminder emails every 30 minutes (not run on startup, to
+  // avoid emailing on every deploy/restart).
+  unreadReminderIntervalId = setInterval(sendUnreadReminders, UNREAD_REMINDER_INTERVAL_MS);
 }
 
 /**
@@ -141,6 +165,10 @@ export function stopTaskScheduler(): void {
   if (imageCleanupIntervalId) {
     clearInterval(imageCleanupIntervalId);
     imageCleanupIntervalId = null;
+  }
+  if (unreadReminderIntervalId) {
+    clearInterval(unreadReminderIntervalId);
+    unreadReminderIntervalId = null;
   }
   logger.info('Task scheduler stopped');
 }

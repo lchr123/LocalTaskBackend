@@ -9,6 +9,7 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { config } from '../config';
 import { runWeeklyDigest, verifyUnsubscribeToken, setEmailOptIn } from '../services/digestService';
+import { runUnreadReminders } from '../services/notificationEmailService';
 import { logger } from '../utils/logger';
 
 const router = Router();
@@ -29,6 +30,31 @@ router.post('/digest/run', async (req: Request, res: Response, next: NextFunctio
     const testEmail = typeof req.query.testEmail === 'string' ? req.query.testEmail : undefined;
 
     const result = await runWeeklyDigest({ dryRun, testEmail });
+    res.status(200).json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /notifications/unread-scan
+ * Manually trigger one unread-message reminder scan (for testing/ops). The
+ * background scheduler (taskScheduler) already runs this every 30 minutes;
+ * this endpoint exists so it can be exercised on demand without waiting.
+ * Requires header `x-digest-secret`. Supports ?dryRun=1 and ?testEmail=.
+ */
+router.post('/notifications/unread-scan', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const secret = req.header('x-digest-secret');
+    if (!config.digest.secret || secret !== config.digest.secret) {
+      res.status(401).json({ error: 'unauthorized' });
+      return;
+    }
+
+    const dryRun = req.query.dryRun === '1' || req.query.dryRun === 'true';
+    const testEmail = typeof req.query.testEmail === 'string' ? req.query.testEmail : undefined;
+
+    const result = await runUnreadReminders({ dryRun, testEmail });
     res.status(200).json(result);
   } catch (err) {
     next(err);

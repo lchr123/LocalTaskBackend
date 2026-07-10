@@ -34,6 +34,12 @@ export const config = {
     /** Backend API base, e.g. https://locallyhelper.com/api — used for the unsubscribe link */
     apiUrl: (process.env.API_PUBLIC_URL || '').replace(/\/$/, ''),
   },
+  unreadReminder: {
+    /** Only remind about sessions whose last message is at least this stale. */
+    staleMinutes: parseInt(process.env.UNREAD_REMINDER_STALE_MINUTES || '30', 10),
+    /** Max recipients claimed per scan; keeps sends well under the provider's daily quota. */
+    dailyCap: parseInt(process.env.UNREAD_REMINDER_DAILY_CAP || '80', 10),
+  },
   rateLimit: {
     auth: parseInt(process.env.RATE_LIMIT_AUTH || '10', 10),
     api: parseInt(process.env.RATE_LIMIT_API || '60', 10),
