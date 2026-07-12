@@ -320,8 +320,266 @@ function TagsManager() {
   );
 }
 
+// ─── Marketplace draft from a Xiaohongshu (小红书) post ──────────────────────
+
+const ITEM_CATEGORY_LABELS_ADMIN: Record<string, string> = {
+  electronics: '电子产品',
+  furniture: '家具家电',
+  clothing: '服饰鞋包',
+  books: '图书文具',
+  other: '其他',
+};
+
+function MarketplaceDraftManager() {
+  const [url, setUrl] = useState('');
+  const [scraping, setScraping] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [scrapeError, setScrapeError] = useState('');
+  const [source, setSource] = useState<any>(null);
+
+  // Editable draft fields — pre-filled from the AI draft, but the admin can
+  // (and should) review/adjust everything before publishing.
+  const [type, setType] = useState('other');
+  const [description, setDescription] = useState('');
+  const [reward, setReward] = useState('');
+  const [contactMethod, setContactMethod] = useState('');
+  const [images, setImages] = useState<string[]>([]);
+  const [address, setAddress] = useState('');
+  const [latitude, setLatitude] = useState('');
+  const [longitude, setLongitude] = useState('');
+  const [deadline, setDeadline] = useState(() => {
+    // Default to +90 days: marketplace listings don't have a natural
+    // deadline concept, but tasks.deadline is NOT NULL and drives
+    // auto-cancellation, so we need a far-future placeholder.
+    const d = new Date();
+    d.setDate(d.getDate() + 90);
+    return d.toISOString().slice(0, 16);
+  });
+  const [publishResult, setPublishResult] = useState<any>(null);
+
+  const handleScrape = async () => {
+    if (!url.trim()) {
+      alert('请输入小红书笔记链接');
+      return;
+    }
+    setScraping(true);
+    setScrapeError('');
+    setPublishResult(null);
+    try {
+      const res = await apiRequest('/marketplace-draft/scrape', {
+        method: 'POST',
+        body: JSON.stringify({ url: url.trim() }),
+      });
+      if (res?.error) {
+        setScrapeError(res.message || '抓取失败');
+        return;
+      }
+      setType(res.draft.type);
+      setDescription(res.draft.description || '');
+      setReward(res.draft.reward != null ? String(res.draft.reward) : '');
+      setContactMethod(res.draft.contactMethod || '');
+      setImages(res.draft.images || []);
+      setSource(res.source);
+    } catch {
+      setScrapeError('抓取失败，请检查网络或稍后重试');
+    } finally {
+      setScraping(false);
+    }
+  };
+
+  const handlePublish = async () => {
+    if (!description.trim() || description.trim().length < 10) {
+      alert('商品描述至少需要10个字符，请检查/补充');
+      return;
+    }
+    if (!reward || isNaN(Number(reward))) {
+      alert('请填写有效的价格');
+      return;
+    }
+    if (images.length === 0) {
+      alert('二手商品至少需要1张图片，请补充');
+      return;
+    }
+    if (!address.trim() || !latitude || !longitude) {
+      alert('请填写地点（地址 + 经纬度）');
+      return;
+    }
+
+    setPublishing(true);
+    try {
+      const res = await apiRequest('/marketplace-draft/publish', {
+        method: 'POST',
+        body: JSON.stringify({
+          type,
+          description: description.trim(),
+          reward: Number(reward),
+          contactMethod: contactMethod.trim() || null,
+          images,
+          location: {
+            address: address.trim(),
+            latitude: Number(latitude),
+            longitude: Number(longitude),
+          },
+          deadline: new Date(deadline).toISOString(),
+        }),
+      });
+      if (res?.error) {
+        alert(res.message || '发布失败');
+        return;
+      }
+      setPublishResult(res);
+      alert('发布成功！');
+    } catch {
+      alert('发布失败，请稍后重试');
+    } finally {
+      setPublishing(false);
+    }
+  };
+
+  return (
+    <div style={{ padding: 16, maxWidth: 720 }}>
+      <p style={{ fontSize: 13, color: '#757575', marginBottom: 16, lineHeight: 1.6 }}>
+        输入你自己在小红书发布过的笔记链接，AI 会自动提取文案和图片并整理成商品草稿。
+        <strong> 请在发布前仔细核对以下所有字段</strong>，AI 提取的内容可能不准确或不完整。
+      </p>
+
+      {/* Step 1: URL input */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        <input
+          type="text"
+          placeholder="https://www.xiaohongshu.com/explore/..."
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          style={{ ...styles.searchInput, flex: 1, width: 'auto' }}
+        />
+        <button onClick={handleScrape} disabled={scraping} style={styles.detailBtn}>
+          {scraping ? '抓取中...' : '🔍 抓取并生成草稿'}
+        </button>
+      </div>
+
+      {scrapeError && (
+        <p style={{ color: '#d32f2f', fontSize: 13, marginBottom: 16 }}>{scrapeError}</p>
+      )}
+
+      {source && (
+        <div style={{ background: '#F5F5F5', borderRadius: 8, padding: 12, marginBottom: 16, fontSize: 12, color: '#666' }}>
+          <div>来源作者：{source.authorName || '未提取到'}</div>
+          <div>原文标题：{source.rawTitle || '未提取到'}</div>
+          <div>图片：抓到 {source.imageCount} 张，成功转存 {source.reuploadedImageCount} 张</div>
+        </div>
+      )}
+
+      {/* Step 2: editable draft form */}
+      {source && (
+        <div style={{ background: '#fff', border: '1px solid #E0E0E0', borderRadius: 8, padding: 16 }}>
+          <h3 style={{ marginTop: 0, fontSize: 15 }}>草稿（发布前请检查）</h3>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>商品分类</label>
+            <select value={type} onChange={(e) => setType(e.target.value)} style={{ ...styles.select, width: '100%', padding: 8 }}>
+              {Object.entries(ITEM_CATEGORY_LABELS_ADMIN).map(([value, label]) => (
+                <option key={value} value={value}>{label}</option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>商品描述 *（10-500字符）</label>
+            <textarea
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              rows={4}
+              style={{ width: '100%', padding: 10, borderRadius: 6, border: '1px solid #ddd', fontSize: 13, boxSizing: 'border-box' as any }}
+            />
+          </div>
+
+          <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>价格（円） *</label>
+              <input
+                type="number"
+                value={reward}
+                onChange={(e) => setReward(e.target.value)}
+                placeholder="AI 未提取到价格时需手动填写"
+                style={{ ...styles.searchInput, width: '100%' }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>联系方式（可选）</label>
+              <input
+                type="text"
+                value={contactMethod}
+                onChange={(e) => setContactMethod(e.target.value)}
+                style={{ ...styles.searchInput, width: '100%' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>地点 *</label>
+            <input
+              type="text"
+              placeholder="地址"
+              value={address}
+              onChange={(e) => setAddress(e.target.value)}
+              style={{ ...styles.searchInput, width: '100%', marginBottom: 6 }}
+            />
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input
+                type="text"
+                placeholder="纬度 latitude"
+                value={latitude}
+                onChange={(e) => setLatitude(e.target.value)}
+                style={{ ...styles.searchInput, flex: 1, width: 'auto' }}
+              />
+              <input
+                type="text"
+                placeholder="经度 longitude"
+                value={longitude}
+                onChange={(e) => setLongitude(e.target.value)}
+                style={{ ...styles.searchInput, flex: 1, width: 'auto' }}
+              />
+            </div>
+          </div>
+
+          <div style={{ marginBottom: 12 }}>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>失效时间（到期后自动下架，默认90天后）</label>
+            <input
+              type="datetime-local"
+              value={deadline}
+              onChange={(e) => setDeadline(e.target.value)}
+              style={{ ...styles.searchInput, width: '100%' }}
+            />
+          </div>
+
+          {images.length > 0 && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>商品图片（{images.length}张，已转存到自有存储）</label>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                {images.map((imgUrl, i) => (
+                  <img key={i} src={imgUrl} alt={`商品图片 ${i + 1}`} style={{ width: 80, height: 80, objectFit: 'cover', borderRadius: 6, border: '1px solid #ddd' }} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button onClick={handlePublish} disabled={publishing} style={{ ...styles.detailBtn, background: '#1976d2', color: '#fff', padding: '10px 20px' }}>
+            {publishing ? '发布中...' : '✅ 确认并发布'}
+          </button>
+        </div>
+      )}
+
+      {publishResult && (
+        <div style={{ marginTop: 16, background: '#E8F5E9', borderRadius: 8, padding: 12, fontSize: 13 }}>
+          ✅ 已发布，任务 ID：{publishResult.id}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Dashboard() {
-  const [tab, setTab] = useState<'users' | 'tasks' | 'reports' | 'chats' | 'reviews' | 'bans' | 'tags'>('users');
+  const [tab, setTab] = useState<'users' | 'tasks' | 'reports' | 'chats' | 'reviews' | 'bans' | 'tags' | 'marketplace-draft'>('users');
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
@@ -475,18 +733,19 @@ function Dashboard() {
       </header>
 
       <nav style={styles.nav}>
-        {(['users', 'tasks', 'reports', 'chats', 'reviews', 'bans', 'tags'] as const).map((t) => (
+        {(['users', 'tasks', 'reports', 'chats', 'reviews', 'bans', 'tags', 'marketplace-draft'] as const).map((t) => (
           <button
             key={t}
             onClick={() => { setTab(t); setPage(1); setStatusFilter(''); setSearchQuery(''); }}
             style={{ ...styles.navBtn, ...(tab === t ? styles.navBtnActive : {}) }}
           >
-            {{ users: '👤 用户', tasks: '📋 任务', reports: '🚨 投诉', chats: '💬 对话', reviews: '⭐ 评价', bans: '🚫 封禁', tags: '🏷️ 标签' }[t]}
+            {{ users: '👤 用户', tasks: '📋 任务', reports: '🚨 投诉', chats: '💬 对话', reviews: '⭐ 评价', bans: '🚫 封禁', tags: '🏷️ 标签', 'marketplace-draft': '🤖 AI 商品草稿' }[t]}
           </button>
         ))}
       </nav>
 
       {tab === 'tags' && <TagsManager />}
+      {tab === 'marketplace-draft' && <MarketplaceDraftManager />}
 
       {tab === 'users' && (
         <div style={styles.filters}>

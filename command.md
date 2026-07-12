@@ -35,3 +35,9 @@ scp -i ./LightsailDefaultKey-ap-northeast-1.pem -r ./admin/dist ubuntu@54.238.16
 # Then on the frontend repo side, copy admin-dist into the nginx build context:
 # cp -r admin-dist/ into LocalTaskApp/ before rebuilding nginx container
 # Or on server: docker cp admin-dist nginx:/var/www/admin/
+
+# lambda-xhs-scraper (container-image Lambda, one-time setup + redeploy)
+# See lambda-xhs-scraper/README.md for full instructions.
+# Requires env vars on the main backend: XHS_SCRAPER_LAMBDA_NAME, OPENAI_API_KEY,
+# OPENAI_MODEL (optional), MARKETPLACE_OFFICIAL_USER_ID (a real app user id to
+# publish AI-generated marketplace drafts under).

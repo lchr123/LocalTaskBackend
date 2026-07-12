@@ -34,6 +34,25 @@ export const config = {
     /** Backend API base, e.g. https://locallyhelper.com/api — used for the unsubscribe link */
     apiUrl: (process.env.API_PUBLIC_URL || '').replace(/\/$/, ''),
   },
+  marketplace: {
+    /**
+     * users.id of the account that AI-generated marketplace drafts are
+     * published under (admin has no Cognito identity of its own, so
+     * POST /admin/marketplace-draft/publish needs a real poster_id to
+     * satisfy tasks.poster_id's FK). Create one dedicated app account once
+     * and put its id here.
+     */
+    officialPosterUserId: process.env.MARKETPLACE_OFFICIAL_USER_ID || '',
+  },
+  xhsScraper: {
+    /** Name (or ARN) of the lambda-xhs-scraper Lambda function. */
+    lambdaFunctionName: process.env.XHS_SCRAPER_LAMBDA_NAME || 'localtask-xhs-scraper',
+    region: process.env.AWS_LAMBDA_REGION || process.env.AWS_S3_REGION || 'ap-northeast-1',
+  },
+  openai: {
+    apiKey: process.env.OPENAI_API_KEY || '',
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
+  },
   unreadReminder: {
     /** Only remind about sessions whose last message is at least this stale. */
     staleMinutes: parseInt(process.env.UNREAD_REMINDER_STALE_MINUTES || '30', 10),

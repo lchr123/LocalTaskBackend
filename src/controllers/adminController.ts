@@ -18,6 +18,10 @@ import { S3Client, GetObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { config } from '../config';
 import { getPresignedUrl } from '../services/uploadService';
+import { scrapeXhsPost } from '../services/xhsScraperService';
+import { downloadAndReuploadImages, structureWithOpenAI } from '../services/marketplaceDraftService';
+import { createTaskSchema } from '../validators/taskValidator';
+import * as taskService from '../services/taskService';
 
 const router = Router();
 
@@ -793,6 +797,104 @@ router.delete('/tags/:id', async (req: Request, res: Response, next: NextFunctio
       return;
     }
     res.status(200).json({ id: result.rows[0].id });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ─── Marketplace draft from a Xiaohongshu (小红书) post ─────────────────────
+
+/**
+ * POST /admin/marketplace-draft/scrape
+ * Body: { url: string }  — a xiaohongshu.com post URL.
+ *
+ * Pipeline: scrape the post (headless-Chromium Lambda) -> re-upload its
+ * images to our own S3 -> ask OpenAI to structure the text into
+ * type/description/reward/contactMethod. Returns a DRAFT only — nothing is
+ * persisted here. The admin reviews/edits the draft in the UI, then submits
+ * it through the normal POST /tasks flow (kind='marketplace').
+ *
+ * Best-effort by design: OpenAI failures fall back to raw text, individual
+ * image download failures are skipped — a partial draft is still useful for
+ * the admin to finish by hand. Only a total scrape failure (no text AND no
+ * images) is treated as a hard error.
+ */
+router.post('/marketplace-draft/scrape', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    const url = typeof req.body.url === 'string' ? req.body.url.trim() : '';
+    if (!url) {
+      res.status(422).json({ error: 'validation_error', message: '请提供小红书笔记链接' });
+      return;
+    }
+
+    const scraped = await scrapeXhsPost(url);
+
+    const [images, structured] = await Promise.all([
+      downloadAndReuploadImages(scraped.images),
+      structureWithOpenAI(scraped.text || scraped.title || ''),
+    ]);
+
+    res.status(200).json({
+      draft: {
+        type: structured.type,
+        description: structured.description,
+        reward: structured.reward,
+        contactMethod: structured.contactMethod,
+        images,
+      },
+      source: {
+        url: scraped.url,
+        authorName: scraped.authorName,
+        rawTitle: scraped.title,
+        rawText: scraped.text,
+        imageCount: scraped.images.length,
+        reuploadedImageCount: images.length,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/**
+ * POST /admin/marketplace-draft/publish
+ * Body: the reviewed/edited draft fields (same shape as CreateTaskPayload,
+ * minus poster — the admin has no Cognito identity of its own).
+ *
+ * Publishes under config.marketplace.officialPosterUserId (a real app user
+ * account dedicated to admin-sourced listings — see config/index.ts). Runs
+ * the SAME createTaskSchema validation as the public POST /tasks endpoint,
+ * so an AI-generated draft can never bypass normal task validation.
+ */
+router.post('/marketplace-draft/publish', async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+  try {
+    if (!config.marketplace.officialPosterUserId) {
+      res.status(500).json({
+        error: 'not_configured',
+        message: '未配置 MARKETPLACE_OFFICIAL_USER_ID，无法发布',
+      });
+      return;
+    }
+
+    const payload = { ...req.body, kind: 'marketplace' as const };
+    const result = createTaskSchema.safeParse(payload);
+
+    if (!result.success) {
+      const fields: Record<string, string> = {};
+      for (const issue of result.error.issues) {
+        const key = issue.path.join('.') || '_root';
+        if (!fields[key]) fields[key] = issue.message;
+      }
+      res.status(422).json({
+        error: 'validation_error',
+        message: Object.values(fields)[0] || '校验失败',
+        fields,
+      });
+      return;
+    }
+
+    const task = await taskService.createTask(config.marketplace.officialPosterUserId, result.data);
+    res.status(201).json(task);
   } catch (err) {
     next(err);
   }

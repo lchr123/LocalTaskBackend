@@ -1,0 +1,10 @@
+{
+  "name": "localtask-xhs-scraper",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Lambda function that renders a Xiaohongshu (小红书) post URL with headless Chromium and extracts title/text/image URLs/author name. Deployed as a container image (Playwright's browser binaries are too large/fragile for a zip-based Lambda layer).",
+  "dependencies": {
+    "playwright-core": "^1.48.0",
+    "@sparticuz/chromium": "^123.0.1"
+  }
+}

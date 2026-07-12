@@ -65,6 +65,9 @@ jobs:
             echo "APP_PUBLIC_URL=${{ secrets.APP_PUBLIC_URL }}" >> .env
             echo "API_PUBLIC_URL=${{ secrets.API_PUBLIC_URL }}" >> .env
             echo "FROM_EMAIL=${{ secrets.FROM_EMAIL }}" >> .env
+            echo "XHS_SCRAPER_LAMBDA_NAME=${{ secrets.XHS_SCRAPER_LAMBDA_NAME }}" >> .env
+            echo "OPENAI_API_KEY=${{ secrets.OPENAI_API_KEY }}" >> .env
+            echo "MARKETPLACE_OFFICIAL_USER_ID=${{ secrets.MARKETPLACE_OFFICIAL_USER_ID }}" >> .env
             sudo docker compose down --rmi all --remove-orphans
             sudo docker compose up -d --build
             sudo docker image prune -f
