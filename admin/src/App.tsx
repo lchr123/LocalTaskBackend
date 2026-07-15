@@ -322,6 +322,31 @@ function TagsManager() {
 
 // ─── Marketplace draft from a Xiaohongshu (小红书) post ──────────────────────
 
+/**
+ * Geocode an address to lat/lng via Google's Geocoding REST API, called
+ * directly from the browser (same approach as LocalTaskApp's web
+ * geocodingService.ts — Google's Geocoding API responds with
+ * Access-Control-Allow-Origin: *, so no backend proxy is needed).
+ */
+async function geocodeAddress(address: string): Promise<{ address: string; latitude: number; longitude: number } | null> {
+  const apiKey = (import.meta as any).env?.VITE_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    throw new Error('未配置 VITE_GOOGLE_MAPS_API_KEY，无法搜索地址');
+  }
+  const params = new URLSearchParams({ address, key: apiKey, language: 'ja', region: 'jp' });
+  const res = await fetch(`https://maps.googleapis.com/maps/api/geocode/json?${params}`);
+  const data = await res.json();
+  if (data.status !== 'OK' || !data.results?.length) {
+    return null;
+  }
+  const { lat, lng } = data.results[0].geometry.location;
+  return {
+    address: data.results[0].formatted_address || address,
+    latitude: lat,
+    longitude: lng,
+  };
+}
+
 const ITEM_CATEGORY_LABELS_ADMIN: Record<string, string> = {
   electronics: '电子产品',
   furniture: '家具家电',
@@ -348,13 +373,16 @@ function MarketplaceDraftManager() {
   const [latitude, setLatitude] = useState('');
   const [longitude, setLongitude] = useState('');
   const [deadline, setDeadline] = useState(() => {
-    // Default to +90 days: marketplace listings don't have a natural
+    // Default to +14 days: marketplace listings don't have a natural
     // deadline concept, but tasks.deadline is NOT NULL and drives
-    // auto-cancellation, so we need a far-future placeholder.
+    // auto-cancellation, so we need a placeholder. The admin can still
+    // extend it manually before publishing.
     const d = new Date();
-    d.setDate(d.getDate() + 90);
+    d.setDate(d.getDate() + 14);
     return d.toISOString().slice(0, 16);
   });
+  const [geocoding, setGeocoding] = useState(false);
+  const [geocodeError, setGeocodeError] = useState('');
   const [publishResult, setPublishResult] = useState<any>(null);
 
   const handleScrape = async () => {
@@ -387,13 +415,42 @@ function MarketplaceDraftManager() {
     }
   };
 
+  const handleGeocodeAddress = async () => {
+    if (!address.trim()) {
+      setGeocodeError('请先输入地址');
+      return;
+    }
+    setGeocoding(true);
+    setGeocodeError('');
+    try {
+      const result = await geocodeAddress(address.trim());
+      if (!result) {
+        setGeocodeError('无法识别该地址，请检查输入后重试');
+        return;
+      }
+      setAddress(result.address);
+      setLatitude(String(result.latitude));
+      setLongitude(String(result.longitude));
+    } catch (err) {
+      setGeocodeError(err instanceof Error ? err.message : '地址搜索失败');
+    } finally {
+      setGeocoding(false);
+    }
+  };
+
   const handlePublish = async () => {
     if (!description.trim() || description.trim().length < 10) {
       alert('商品描述至少需要10个字符，请检查/补充');
       return;
     }
-    if (!reward || isNaN(Number(reward))) {
-      alert('请填写有效的价格');
+    // Price is optional. tasks.reward has a DB CHECK constraint requiring
+    // >= 0.01 (see migrations/003_create_tasks.sql), and createTaskSchema
+    // additionally requires reward to be an INTEGER — so an empty price
+    // defaults to 1 (not 0.01, which fails the integer check, and not 0,
+    // which fails the DB check). If a value IS entered, it must still be a
+    // valid number.
+    if (reward.trim() && isNaN(Number(reward))) {
+      alert('请填写有效的价格，或留空');
       return;
     }
     if (images.length === 0) {
@@ -412,7 +469,7 @@ function MarketplaceDraftManager() {
         body: JSON.stringify({
           type,
           description: description.trim(),
-          reward: Number(reward),
+          reward: reward.trim() ? Number(reward) : 1,
           contactMethod: contactMethod.trim() || null,
           images,
           location: {
@@ -495,12 +552,12 @@ function MarketplaceDraftManager() {
 
           <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
             <div style={{ flex: 1 }}>
-              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>价格（円） *</label>
+              <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>价格（円，可选）</label>
               <input
                 type="number"
                 value={reward}
                 onChange={(e) => setReward(e.target.value)}
-                placeholder="AI 未提取到价格时需手动填写"
+                placeholder="留空则默认为1円"
                 style={{ ...styles.searchInput, width: '100%' }}
               />
             </div>
@@ -517,33 +574,35 @@ function MarketplaceDraftManager() {
 
           <div style={{ marginBottom: 12 }}>
             <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>地点 *</label>
-            <input
-              type="text"
-              placeholder="地址"
-              value={address}
-              onChange={(e) => setAddress(e.target.value)}
-              style={{ ...styles.searchInput, width: '100%', marginBottom: 6 }}
-            />
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, marginBottom: 6 }}>
               <input
                 type="text"
-                placeholder="纬度 latitude"
-                value={latitude}
-                onChange={(e) => setLatitude(e.target.value)}
+                placeholder="输入日本格式地址（如「東京都渋谷区神宮前1-1-1」）"
+                value={address}
+                onChange={(e) => { setAddress(e.target.value); setGeocodeError(''); }}
+                onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); handleGeocodeAddress(); } }}
                 style={{ ...styles.searchInput, flex: 1, width: 'auto' }}
               />
-              <input
-                type="text"
-                placeholder="经度 longitude"
-                value={longitude}
-                onChange={(e) => setLongitude(e.target.value)}
-                style={{ ...styles.searchInput, flex: 1, width: 'auto' }}
-              />
+              <button onClick={handleGeocodeAddress} disabled={geocoding} style={styles.detailBtn}>
+                {geocoding ? '搜索中...' : '🔍 搜索地址'}
+              </button>
             </div>
+            {geocodeError && (
+              <p style={{ color: '#d32f2f', fontSize: 12, margin: '0 0 6px' }}>{geocodeError}</p>
+            )}
+            {latitude && longitude ? (
+              <p style={{ fontSize: 12, color: '#388e3c', margin: 0 }}>
+                ✓ 坐标已确认: {Number(latitude).toFixed(4)}, {Number(longitude).toFixed(4)}
+              </p>
+            ) : (
+              <p style={{ fontSize: 12, color: '#999', margin: 0 }}>
+                尚未确定坐标，请输入地址后点击"搜索地址"
+              </p>
+            )}
           </div>
 
           <div style={{ marginBottom: 12 }}>
-            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>失效时间（到期后自动下架，默认90天后）</label>
+            <label style={{ fontSize: 13, fontWeight: 600, display: 'block', marginBottom: 4 }}>失效时间（到期后自动下架，默认14天后）</label>
             <input
               type="datetime-local"
               value={deadline}

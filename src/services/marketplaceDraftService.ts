@@ -60,7 +60,14 @@ function getOpenAIClient(): OpenAI {
 export async function downloadAndReuploadImages(imageUrls: string[]): Promise<string[]> {
   const uploaded: string[] = [];
 
-  for (const url of imageUrls) {
+  for (const rawUrl of imageUrls) {
+    // Xiaohongshu's meta tags and DOM often return protocol-relative URLs
+    // (e.g. "//picasso-static.xiaohongshu.com/..."). Browsers resolve these
+    // against the current page's protocol automatically, but Node's fetch()
+    // requires an absolute URL and throws "Failed to parse URL" otherwise —
+    // which downloadAndReuploadImages was silently swallowing as a per-image
+    // failure, so every image was dropped without a clear error.
+    const url = rawUrl.startsWith('//') ? `https:${rawUrl}` : rawUrl;
     try {
       const res = await fetch(url);
       if (!res.ok) {

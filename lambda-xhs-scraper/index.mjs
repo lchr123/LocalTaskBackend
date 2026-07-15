@@ -59,6 +59,60 @@ function isXhsUrl(candidate) {
 }
 
 /**
+ * Extract via window.__INITIAL_STATE__ — the SSR hydration state Xiaohongshu
+ * embeds in every note detail page. This is the PREFERRED source: it's
+ * structured JSON (not brittle CSS selectors) and contains the real image
+ * CDN URLs, full text, and author name directly from the note's own data,
+ * rather than a page-level fallback image.
+ *
+ * Shape (as of this writing):
+ *   window.__INITIAL_STATE__.note.noteDetailMap[noteId].note = {
+ *     title, desc, user: { nickname }, imageList: [{ urlDefault, urlPre }]
+ *   }
+ * imageList URLs point at sns-webpic-qc.xhscdn.com with a signature suffix
+ * (e.g. ".../<key>!whatever"); the actual re-hostable image lives at
+ * https://ci.xiaohongshu.com/<key> once that suffix is stripped.
+ *
+ * Returns null (not a partial object) if the state or note isn't found, so
+ * the caller can cleanly fall back to DOM/meta extraction.
+ */
+async function extractFromInitialState(page, pageUrl) {
+  return page.evaluate((currentUrl) => {
+    try {
+      const state = window.__INITIAL_STATE__;
+      const noteDetailMap = state?.note?.noteDetailMap;
+      if (!noteDetailMap) return null;
+
+      const idMatch = currentUrl.match(/\/(?:explore|discovery\/item)\/([^/?#]+)/);
+      const noteId = idMatch?.[1];
+      const note = noteId ? noteDetailMap[noteId]?.note : null;
+      if (!note) return null;
+
+      const title = note.title || null;
+      const text = note.desc || null;
+      const authorName = note.user?.nickname || note.user?.nickName || null;
+
+      const cdnKeyPattern = /xhscdn\.com\/[^/]+\/[^/]+\/([0-9a-zA-Z]+)!/;
+      const images = (note.imageList || [])
+        .map((img) => {
+          const src = img?.urlDefault || img?.urlPre || null;
+          if (!src) return null;
+          const match = src.match(cdnKeyPattern);
+          // Strip the signed-URL suffix and re-request from ci.xiaohongshu.com
+          // at full quality/format — this is what makes the URL stable
+          // enough to download server-side rather than short-lived/signed.
+          return match ? `https://ci.xiaohongshu.com/${match[1]}?imageView2/2/w/format/png` : src;
+        })
+        .filter(Boolean);
+
+      return { title, text, images, authorName };
+    } catch {
+      return null;
+    }
+  }, pageUrl);
+}
+
+/**
  * Extract via Open Graph / Twitter Card meta tags. Cheap, fast, most stable.
  */
 async function extractFromMetaTags(page) {
@@ -127,12 +181,13 @@ async function extractFromDom(page) {
   });
 }
 
-function mergeResults(preferred, fallback) {
+function mergeResults(...resultsInPriorityOrder) {
+  const results = resultsInPriorityOrder.filter(Boolean);
   return {
-    title: preferred.title || fallback.title || null,
-    text: preferred.text || fallback.text || null,
-    images: preferred.images?.length ? preferred.images : fallback.images || [],
-    authorName: preferred.authorName || fallback.authorName || null,
+    title: results.map((r) => r.title).find(Boolean) || null,
+    text: results.map((r) => r.text).find(Boolean) || null,
+    images: results.map((r) => r.images).find((imgs) => imgs?.length) || [],
+    authorName: results.map((r) => r.authorName).find(Boolean) || null,
   };
 }
 
@@ -167,13 +222,17 @@ export const handler = async (event) => {
     // Client-side rendered content needs a beat after DOMContentLoaded.
     await page.waitForTimeout(RENDER_WAIT_MS);
 
-    const [metaResult, domResult] = await Promise.all([
+    const [stateResult, metaResult, domResult] = await Promise.all([
+      extractFromInitialState(page, page.url()).catch(() => null),
       extractFromMetaTags(page).catch(() => ({ title: null, text: null, images: [], authorName: null })),
       extractFromDom(page).catch(() => ({ title: null, text: null, images: [], authorName: null })),
     ]);
 
-    // DOM extraction is richer when it works; meta tags are the fallback.
-    const result = mergeResults(domResult, metaResult);
+    // __INITIAL_STATE__ is preferred (structured data straight from the
+    // note, real image CDN URLs) — DOM selectors are the next best thing
+    // when it works, meta tags (a single page-level fallback image) are
+    // the last resort.
+    const result = mergeResults(stateResult, domResult, metaResult);
 
     await browser.close();
 
